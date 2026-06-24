@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+python-multipart
+pydantic>=2.10
+groq
+google-genai
+pypdf
+Pillow>=11
+aiofiles
+reportlab
