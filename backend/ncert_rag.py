@@ -6,11 +6,97 @@ Chroma collection. All subsequent calls reuse the index — no network, no API.
 `rag_retrieve(query, grade_level, subject)` returns a formatted context block
 similar to the legacy `retrieve_context` from cbse_kb, but uses embeddings so
 "Photosynthesis" matches "Life Processes" via semantic similarity.
+
+`fetch_ncert_chapter_text(grade, subject, chapter)` fetches live NCERT book
+content from ncert.nic.in (open source, free) and returns extracted text.
 """
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
+
+# ─── NCERT open-source book URL patterns ────────────────────────────────────
+# NCERT hosts all textbooks openly at ncert.nic.in
+_NCERT_BASE = "https://ncert.nic.in/textbook/pdf"
+
+# Subject code map for NCERT PDF URLs
+_SUBJECT_CODE = {
+    "English":          {"10": "jela1", "9": "iela1", "8": "hela1", "7": "gela1",
+                         "6": "fela1", "11": "kela1", "12": "lela1"},
+    "Mathematics":      {"10": "jemh1", "9": "iemh1", "8": "hemh1", "7": "gemh1",
+                         "6": "femh1", "11": "kemh1", "12": "lemh1"},
+    "Maths":            {"10": "jemh1", "9": "iemh1", "8": "hemh1", "7": "gemh1",
+                         "6": "femh1", "11": "kemh1", "12": "lemh1"},
+    "Science":          {"10": "jesc1", "9": "iesc1", "8": "hesc1", "7": "gesc1",
+                         "6": "fesc1"},
+    "Social Science":   {"10": "jess4", "9": "iess4", "8": "hess4", "7": "gess4",
+                         "6": "fess4"},
+    "Hindi":            {"10": "jehl1", "9": "iehl1", "8": "hehl1", "7": "gehl1",
+                         "6": "fehl1"},
+    "Physics":          {"11": "keph1", "12": "leph1"},
+    "Chemistry":        {"11": "kech1", "12": "lech1"},
+    "Biology":          {"11": "kebo1", "12": "lebo1"},
+}
+
+_ncert_cache: dict[str, str] = {}  # cache fetched text by key
+
+
+def fetch_ncert_chapter_text(grade: int, subject: str, chapter_num: int,
+                              max_chars: int = 3000) -> str:
+    """Fetch NCERT chapter text from ncert.nic.in (open source).
+    Returns extracted text or '' if unavailable."""
+    import urllib.request
+    from pypdf import PdfReader
+    import io
+
+    grade_str = str(grade)
+    subj_codes = _SUBJECT_CODE.get(subject, {})
+    code = subj_codes.get(grade_str, "")
+    if not code:
+        return ""
+
+    cache_key = f"{grade}|{subject}|{chapter_num}"
+    if cache_key in _ncert_cache:
+        return _ncert_cache[cache_key]
+
+    # NCERT PDF URL pattern: e.g. https://ncert.nic.in/textbook/pdf/jesc101.pdf (Chapter 1)
+    ch_str = str(chapter_num).zfill(2)
+    url = f"{_NCERT_BASE}/{code}{ch_str}.pdf"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            raw = resp.read()
+        reader = PdfReader(io.BytesIO(raw))
+        pages_text = []
+        for page in reader.pages[:6]:  # first 6 pages of the chapter
+            t = page.extract_text() or ""
+            if t.strip():
+                pages_text.append(t.strip())
+        text = "\n".join(pages_text)[:max_chars]
+        _ncert_cache[cache_key] = text
+        print(f"[ncert_rag] fetched NCERT G{grade} {subject} ch{chapter_num} ({len(text)} chars)")
+        return text
+    except Exception as e:
+        print(f"[ncert_rag] could not fetch {url}: {e}")
+        _ncert_cache[cache_key] = ""
+        return ""
+
+
+def get_ncert_context_for_grading(grade: int, subject: str, chapter: str,
+                                   query: str = "") -> str:
+    """Get NCERT book content for grading context.
+    First tries live fetch from ncert.nic.in, falls back to local RAG."""
+    # Try to extract chapter number from chapter string
+    ch_match = re.search(r"\d+", chapter or "")
+    if ch_match:
+        ch_num = int(ch_match.group())
+        live_text = fetch_ncert_chapter_text(grade, subject, ch_num)
+        if live_text:
+            return (f"NCERT Grade {grade} {subject} Chapter {ch_num} "
+                    f"(official textbook content):\n{live_text}")
+    # Fallback to local RAG
+    return rag_retrieve(query or chapter or subject, grade, subject, top_k=3)
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _DB_PATH = os.path.join(_HERE, "data", "ncert_chroma")

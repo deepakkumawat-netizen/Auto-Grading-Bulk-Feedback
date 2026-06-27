@@ -1,5 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
+import ExamConfigPanel from '../components/ExamConfigPanel.jsx'
 import ClassAnalytics from '../components/ClassAnalytics.jsx'
+import AgentPanel from '../components/AgentPanel.jsx'
 import RubricLibrary from '../components/RubricLibrary.jsx'
 import HistoryModal from '../components/HistoryModal.jsx'
 import Button from '../ui/Button.jsx'
@@ -18,9 +20,15 @@ Q3 (5 marks): Expected explanation + example...`
 
 export default function Grader({ onHome }) {
   const { push } = useToast()
-  const [rubric, setRubric] = useState('')
-  const [files, setFiles]   = useState([])
-  const [verify, setVerify] = useState(true)
+  const [rubric, setRubric]         = useState('')
+  const [files, setFiles]           = useState([])
+  const [verify, setVerify]               = useState(true)
+  const [ncertCheck, setNcertCheck]       = useState(false)
+  const [studyPlan, setStudyPlan]         = useState(false)
+  const [totalMarks, setTotalMarks]       = useState('')
+  const [gradeOverride, setGradeOverride] = useState('')
+  const [subjectOverride, setSubjectOverride] = useState('')
+  const [examConfig, setExamConfig]       = useState({})
   const [health, setHealth] = useState(null)
 
   // Rubric source: 'manual' (default) or 'paper' (upload a question paper, AI generates rubric)
@@ -52,11 +60,30 @@ export default function Grader({ onHome }) {
       setPaperMeta({
         questions_found: data.questions_found,
         total_marks:     data.total_marks,
+        paper_grade:     data.paper_grade,
+        paper_subject:   data.paper_subject,
+        paper_board:     data.paper_board,
       })
+      // Auto-fill ExamConfigPanel with grade/subject/board read from the question paper header
+      if (data.paper_grade || data.paper_subject || data.paper_board) {
+        setExamConfig(prev => ({
+          ...prev,
+          ...(data.paper_grade   ? { grade: data.paper_grade }     : {}),
+          ...(data.paper_subject ? { subject: data.paper_subject }  : {}),
+          ...(data.paper_board   ? { board: data.paper_board }      : {}),
+          ...(data.total_marks   ? { paper_total: data.total_marks } : {}),
+        }))
+      }
+      if (data.total_marks) setTotalMarks(String(data.total_marks))
+      const metaHints = [
+        data.paper_grade   ? `Grade ${data.paper_grade}` : null,
+        data.paper_subject || null,
+        data.paper_board   || null,
+      ].filter(Boolean).join(' · ')
       push({
         kind:  'success',
         title: '✨ Rubric generated from question paper',
-        body:  `${data.questions_found} question${data.questions_found === 1 ? '' : 's'} found · total ${data.total_marks} marks`,
+        body:  `${data.questions_found} question${data.questions_found === 1 ? '' : 's'} found · ${data.total_marks} marks${metaHints ? ` · ${metaHints}` : ''}`,
       })
     } catch (e) {
       push({ kind: 'error', title: 'Rubric generation failed', body: String(e.message || e) })
@@ -74,6 +101,14 @@ export default function Grader({ onHome }) {
     const fd = new FormData()
     fd.append('rubric', rubric)
     fd.append('verify', String(verify))
+    fd.append('ncert_check', String(ncertCheck))
+    fd.append('study_plan', String(studyPlan))
+    fd.append('total_marks', String(parseInt(totalMarks) || 0))
+    fd.append('grade_override', String(parseInt(gradeOverride) || (examConfig.grade || 0)))
+    fd.append('subject_override', subjectOverride.trim() || (examConfig.subject || ''))
+    if (examConfig && Object.keys(examConfig).length) {
+      fd.append('exam_config', JSON.stringify(examConfig))
+    }
     files.forEach(f => fd.append('files', f, f.name))
     const r = await fetch('/api/grade/bulk', { method: 'POST', body: fd, signal })
     if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`)
@@ -217,8 +252,8 @@ export default function Grader({ onHome }) {
         <div className="auto-detect-info">
           <span className="ad-icon">🪄</span>
           <div>
-            <b>No scope selection needed.</b> AI auto-detects each student's
-            grade, subject and chapter from the answer itself.
+            <b>Grade &amp; subject are auto-detected from each answer sheet.</b> Use the
+            fields below to override when the paper has no grade/class printed on it.
           </div>
         </div>
 
@@ -252,7 +287,11 @@ export default function Grader({ onHome }) {
                 {paperMeta && (
                   <div className="paper-meta-pill">
                     ✨ Generated: <b>{paperMeta.questions_found} questions</b> ·
-                    total <b>{paperMeta.total_marks} marks</b> · review and edit below if needed
+                    total <b>{paperMeta.total_marks} marks</b>
+                    {paperMeta.paper_grade   && <> · <b>Grade {paperMeta.paper_grade}</b></>}
+                    {paperMeta.paper_subject && <> · <b>{paperMeta.paper_subject}</b></>}
+                    {paperMeta.paper_board   && <> · <b>{paperMeta.paper_board}</b></>}
+                    {' '}· auto-filled below ↓
                   </div>
                 )}
               </>
@@ -280,10 +319,74 @@ export default function Grader({ onHome }) {
               <input type="checkbox" checked={verify}
                      onChange={e => setVerify(e.target.checked)} disabled={bulk.loading}/>
               <div>
-                <div className="vt-title">🔍 Run Verifier Agent</div>
+                <div className="vt-title">🔍 Verifier Agent <span className="vt-speed">+3s/sheet</span></div>
                 <div className="vt-sub">A second AI reviews every grade — flags over-generous marks.</div>
               </div>
             </label>
+            <label className="verify-toggle">
+              <input type="checkbox" checked={ncertCheck}
+                     onChange={e => setNcertCheck(e.target.checked)} disabled={bulk.loading}/>
+              <div>
+                <div className="vt-title">📚 NCERT Validator <span className="vt-speed">+3s/sheet</span></div>
+                <div className="vt-sub">Checks if answers match official NCERT book content.</div>
+              </div>
+            </label>
+            <label className="verify-toggle">
+              <input type="checkbox" checked={studyPlan}
+                     onChange={e => setStudyPlan(e.target.checked)} disabled={bulk.loading}/>
+              <div>
+                <div className="vt-title">📖 Study Plan <span className="vt-speed">+3s/sheet</span></div>
+                <div className="vt-sub">Generates a personalised next-steps plan for struggling students.</div>
+              </div>
+            </label>
+            <div className="total-marks-row">
+              <label className="total-marks-label">
+                📋 Total marks of this paper
+                <span className="total-marks-hint">(optional — fixes wrong totals like 81 instead of 80)</span>
+              </label>
+              <input
+                type="number"
+                className="total-marks-input"
+                placeholder="e.g. 80"
+                min="1" max="500"
+                value={totalMarks}
+                onChange={e => setTotalMarks(e.target.value)}
+                disabled={bulk.loading}
+              />
+            </div>
+            <ExamConfigPanel value={examConfig} onChange={setExamConfig} />
+            <div className="override-row">
+              <div className="override-field">
+                <label className="override-label">
+                  🏫 Class / Grade
+                  <span className="total-marks-hint">(override if AI guesses wrong)</span>
+                </label>
+                <input
+                  type="number"
+                  className="total-marks-input"
+                  placeholder="e.g. 10"
+                  min="1" max="12"
+                  value={gradeOverride}
+                  onChange={e => setGradeOverride(e.target.value)}
+                  disabled={bulk.loading}
+                />
+              </div>
+              <div className="override-field">
+                <label className="override-label">
+                  📚 Subject
+                  <span className="total-marks-hint">(override if wrong)</span>
+                </label>
+                <select className="total-marks-input" value={subjectOverride}
+                        onChange={e => setSubjectOverride(e.target.value)}
+                        disabled={bulk.loading}>
+                  <option value="">Auto-detect</option>
+                  {['English','Mathematics','Science','Physics','Chemistry','Biology',
+                    'Social Science','Hindi','Sanskrit','Computer Science'].map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
           </Card.Body>
         </Card>
 
@@ -311,6 +414,7 @@ export default function Grader({ onHome }) {
         {report && (
           <section className="results">
             <ClassAnalytics results={report.results} analytics={report.class_analytics} />
+            <AgentPanel results={report.results} rubric={rubric} classStats={report.class_analytics} />
 
             <h3 className="results-h">📋 Student results
               {flaggedCount > 0 && <span className="results-flag">  ·  {flaggedCount} flagged by verifier</span>}
@@ -346,8 +450,12 @@ export default function Grader({ onHome }) {
                               </span>
                             ) : ''}
                           </td>
-                          <td>{r.ok ? `${r.marks_awarded}/${r.marks_total}` : '—'}</td>
+                          <td>
+                            {r.ok ? `${r.marks_awarded}/${r.marks_total}` : '—'}
+                            {r.grade_tier && <span className="grade-tier-badge" style={{marginLeft:6}}>{r.grade_tier}</span>}
+                          </td>
                           <td>{r.ok ? `${r.percentage}%` : ''}</td>
+
                           <td>{r.verifier
                                 ? (r.verifier.agrees ? `✓ ${r.verifier.confidence ?? ''}%` : `⚠ suggests ${r.verifier.suggested_marks}`)
                                 : ''}</td>
@@ -398,6 +506,11 @@ function triggerDownload(blob, filename) {
   const a = document.createElement('a')
   a.href = url; a.download = filename; a.click()
   URL.revokeObjectURL(url)
+}
+
+const FORMAT_ICON = {
+  text: '📝', diagram: '🖼', table: '📋', math: '🔢',
+  bullets: '📌', hinglish: '🗣', mixed: '🔄',
 }
 
 function FeedbackPanel({ result, onDownloadTranscript }) {
@@ -471,17 +584,38 @@ function FeedbackPanel({ result, onDownloadTranscript }) {
         )}
       </div>
 
+      {(result.answer_formats_used?.length > 0 || result.detected_language) && (
+        <div className="fp-block fp-formats">
+          <div className="fp-label">🎨 Answer formats detected</div>
+          <div className="format-badges">
+            {result.detected_language && (
+              <span className="fmt-badge fmt-language" title="Language detected in this answer sheet">
+                🌐 {result.detected_language}
+              </span>
+            )}
+            {result.answer_formats_used?.map(f => (
+              <span key={f} className={`fmt-badge fmt-${f}`}>
+                {FORMAT_ICON[f] || '📝'} {f}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {result.per_question?.length > 0 && (
         <div className="fp-block">
           <div className="fp-label">📋 Per-question feedback</div>
           <table className="fp-table">
             <thead>
-              <tr><th>Question</th><th>Marks</th><th>Feedback</th></tr>
+              <tr><th>Question</th><th>Format</th><th>Marks</th><th>Feedback</th></tr>
             </thead>
             <tbody>
               {result.per_question.map((q, i) => (
                 <tr key={i}>
                   <td className="fp-q">{q.q}</td>
+                  <td className="fp-fmt">
+                    {q.format && <span className={`fmt-badge-sm fmt-${q.format}`}>{FORMAT_ICON[q.format] || '📝'}</span>}
+                  </td>
                   <td className="fp-m">{q.marks_awarded}/{q.marks_total}</td>
                   <td className="fp-f">{q.feedback}</td>
                 </tr>

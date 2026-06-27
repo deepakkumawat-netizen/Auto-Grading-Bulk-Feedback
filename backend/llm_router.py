@@ -24,7 +24,7 @@ _gemini_client: genai.Client | None = None
 
 _GROQ_TEXT_CHAIN = [
     "llama-3.3-70b-versatile",   # smartest, lowest TPM cap — primary
-    "openai/gpt-oss-120b",       # comparable quality, separate TPM bucket
+    "mixtral-8x7b-32768",        # comparable quality, separate TPM bucket
     "llama-3.1-8b-instant",      # last-resort: 8× higher TPM but may over-count marks
 ]
 
@@ -39,14 +39,40 @@ def _parse_retry_after(msg: str) -> float:
     return 15.0
 
 
+def _gemini_text_fallback(messages, *, max_tokens: int, temperature: float = 0.2,
+                           response_format=None) -> str:
+    """Last-resort text fallback when ALL Groq models are rate-limited.
+    Uses Gemini 2.5 Flash — 1M context, generous free tier, separate quota bucket.
+    Converts Groq-style messages list into a single Gemini prompt."""
+    sys_parts = [m["content"] for m in messages if m.get("role") == "system"]
+    usr_parts = [m["content"] for m in messages if m.get("role") == "user"]
+    prompt = ""
+    if sys_parts:
+        prompt += "SYSTEM:\n" + "\n".join(sys_parts) + "\n\n"
+    prompt += "\n".join(usr_parts)
+
+    want_json = bool(response_format and response_format.get("type") == "json_object")
+    cfg_kwargs = dict(temperature=temperature, max_output_tokens=max_tokens)
+    if want_json:
+        cfg_kwargs["response_mime_type"] = "application/json"
+
+    rsp = _gemini().models.generate_content(
+        model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+        contents=[prompt],
+        config=gtypes.GenerateContentConfig(**cfg_kwargs),
+    )
+    return rsp.text or ""
+
+
 def _groq_chat_with_retry(model: str, messages, *, max_tokens: int,
                            temperature: float = 0.2,
                            response_format=None) -> str:
     """Run a Groq chat completion. On 429 rate-limit:
       - Retry up to 3× on the SAME (smartest) model using the exact wait time
         Groq returns in its error message
-      - Only fall through to a smaller model as a LAST resort — smaller models
-        over-count CBSE marks (e.g. seeing 220 when the paper is actually 80)"""
+      - Fall through to other Groq models as a LAST resort (smaller models
+        over-count CBSE marks — verify rubric carefully when this happens)
+      - If ALL Groq models fail → fall back to Gemini 2.5 Flash (separate quota)"""
     chain = [model] + [m for m in _GROQ_TEXT_CHAIN if m != model]
     seen = set(); chain = [m for m in chain if not (m in seen or seen.add(m))]
     last_err = None
@@ -75,8 +101,19 @@ def _groq_chat_with_retry(model: str, messages, *, max_tokens: int,
                         continue
                     print(f"[groq {m}] still rate-limited after {max_attempts} tries — falling to next model")
                     break
-                raise
-    raise RuntimeError(f"All Groq models rate-limited. Last error: {last_err}")
+                else:
+                    print(f"[groq {m}] failed with error ({e}) — falling to next model")
+                    break
+    # All Groq models exhausted — fall back to Gemini (separate quota bucket)
+    print(f"[groq→gemini] All Groq models rate-limited. Falling back to Gemini 2.5 Flash. Last Groq err: {last_err}")
+    try:
+        return _gemini_text_fallback(messages, max_tokens=max_tokens,
+                                      temperature=temperature,
+                                      response_format=response_format)
+    except Exception as ge:
+        raise RuntimeError(
+            f"Both Groq AND Gemini fallback failed. Groq: {last_err}. Gemini: {ge}"
+        )
 
 
 def _groq() -> Groq:
@@ -131,6 +168,90 @@ def _chunk_paper_by_questions(text: str, max_chars: int) -> list[str]:
     return [c for c in chunks if c.strip()]
 
 
+def extract_paper_metadata(paper_text: str) -> dict[str, Any]:
+    """Extract grade, subject, board, and total_marks from a CBSE question paper header.
+    Uses regex — no LLM call needed. The paper header always has this info printed.
+
+    Returns: { grade: int|None, subject: str, board: str, total_marks: int|None }
+    """
+    # Take first 800 chars — the header is always at the top
+    header = paper_text[:800]
+
+    # Grade: "Class X", "Class 10", "Std XII", "Grade 10"
+    grade = None
+    gm = re.search(
+        r'(?:class|std\.?|grade)\s*[:\-]?\s*([IVXLCDM]+|\d{1,2})\b',
+        header, re.IGNORECASE,
+    )
+    if gm:
+        raw_g = gm.group(1).strip().upper()
+        roman = {"I":1,"II":2,"III":3,"IV":4,"V":5,"VI":6,"VII":7,"VIII":8,
+                 "IX":9,"X":10,"XI":11,"XII":12}
+        grade = roman.get(raw_g) or (int(raw_g) if raw_g.isdigit() else None)
+        if grade:
+            grade = max(1, min(12, grade))
+
+    # Subject: check paper text (first 2000 chars) — not just 800 — for more reliable detection.
+    # Step 1: explicit "Subject: ..." label (most reliable)
+    scan_zone = paper_text[:2000].lower()
+    subject = ""
+    sm = re.search(r'subject\s*[:\-]\s*([A-Za-z ()]{3,50})', paper_text[:2000], re.IGNORECASE)
+    if sm:
+        raw_sub = sm.group(1).strip().title()
+        # Normalize CBSE variants like "Mathematics (Standard)" → "Mathematics"
+        for canonical in ["Mathematics","Science","Physics","Chemistry","Biology",
+                          "English","Hindi","Social Science","Sanskrit","Computer Science"]:
+            if canonical.lower() in raw_sub.lower():
+                subject = canonical
+                break
+        if not subject:
+            subject = raw_sub
+
+    if not subject:
+        # Score-based keyword match across the top section of the paper.
+        # Multi-word phrases checked before single words to avoid false positives.
+        _SUBJ_SCORED = [
+            ("Mathematics", [("mathematics standard",10),("mathematics basic",10),
+                             ("mathematics",8),("maths",8),("math",6)]),
+            ("Social Science", [("social science",8),("sst",6),("history",4),
+                                ("geography",4),("civics",4)]),
+            ("Computer Science", [("computer science",8),("informatics",6)]),
+            ("Science",      [("general science",8),("science",6)]),
+            ("Physics",      [("physics",8)]),
+            ("Chemistry",    [("chemistry",8)]),
+            ("Biology",      [("biology",8)]),
+            ("English",      [("english",8)]),
+            ("Hindi",        [("hindi",8)]),
+            ("Sanskrit",     [("sanskrit",8)]),
+        ]
+        scores: dict[str, int] = {}
+        for subj, kw_list in _SUBJ_SCORED:
+            total = sum(w for kw, w in kw_list if kw in scan_zone)
+            if total:
+                scores[subj] = total
+        if scores:
+            subject = max(scores, key=scores.__getitem__)
+
+    # Board
+    board = ""
+    if re.search(r'\bCBSE\b', header, re.IGNORECASE):
+        board = "CBSE"
+    elif re.search(r'\bICSE\b|\bISC\b', header, re.IGNORECASE):
+        board = "ICSE"
+    elif re.search(r'maharashtra|msbshse', header, re.IGNORECASE):
+        board = "Maharashtra State Board"
+    elif re.search(r'UP\s*board|UPMSP', header, re.IGNORECASE):
+        board = "UP Board"
+
+    # Total marks (scan full header section)
+    total_marks = None
+    tm = re.search(r'(?:maximum|total|max\.?)\s*marks?\s*[:\-]?\s*(\d{2,4})', paper_text[:2000], re.IGNORECASE)
+    if tm:
+        total_marks = int(tm.group(1))
+
+    return {"grade": grade, "subject": subject, "board": board, "total_marks": total_marks}
+
+
 def generate_rubric_from_questions(question_paper_text: str) -> dict[str, Any]:
     """Read a question paper (extracted text) and produce a teacher-ready rubric.
 
@@ -157,33 +278,17 @@ def generate_rubric_from_questions(question_paper_text: str) -> dict[str, Any]:
     paper = chunks[0]
     truncated_note = ""
     prompt = (
-        "You are a CBSE teacher building a marking rubric from a question paper.\n\n"
-        "🎯 CRITICAL — TOTAL MARKS RULE:\n"
-        "Look at the TOP of the paper for 'Maximum Marks : NN' (e.g. 'Maximum Marks : 80', "
-        "'Maximum Marks : 120', 'Total Marks: 150'). Your `total_marks` MUST equal that "
-        "declared value EXACTLY — whether it's 30, 80, 100, 120, 150, or anything else. "
-        "Use the paper's declared total, do NOT cap or guess.\n\n"
-        "🚫 ANTI-DOUBLE-COUNT RULE:\n"
-        "CBSE papers often have a parent question (e.g. 'Q1 [10 marks]') broken into "
-        "sub-questions (Q1.1, Q1.2, …, each 1-2 marks). The sub-question marks ADD UP "
-        "to the parent's total — they are NOT additional marks. \n"
-        "  ✅ CORRECT: list ONLY the sub-questions (Q1.1, Q1.2, …) OR ONLY the parent "
-        "(Q1 with combined description). Pick ONE level.\n"
-        "  ❌ WRONG: listing BOTH Q1 (10 marks) AND Q1.1–Q1.9 (1–2 marks each) — that "
-        "doubles the total.\n"
-        "Prefer the FINE level (sub-questions) so the grader knows what to look for per part.\n\n"
-        "For EACH chosen question:\n"
-        "  1. Extract the visible mark allocation ('[5 marks]', '(3)', '5M', 'Marks: 5').\n"
-        "  2. Identify what the answer SHOULD contain — concepts, formulas, key facts, "
-        "examples, derivation steps, working shown.\n"
-        "  3. Output ONE line per question:\n"
-        "        Q1 (X marks): expected key points — what to look for to award marks\n\n"
-        "Be specific (e.g. 'state Newton's second law + derive v=u+at + numerical "
-        "substitution shown'), NOT vague ('explain the concept').\n\n"
-        "VERIFY before returning: sum of all (X marks) in rubric == total_marks == declared "
-        "'Maximum Marks' at top of paper. If they don't match, FIX before returning.\n\n"
+        "You are a CBSE senior examiner writing a DETAILED marking rubric from a question paper.\n\n"
+        "🎯 TOTAL MARKS RULE:\n"
+        "Find 'Maximum Marks : NN' at the top. Your `total_marks` MUST equal that value EXACTLY.\n\n"
+        "🚫 ANTI-DOUBLE-COUNT: Sub-questions (Q1.1, Q1.2) already sum to the parent (Q1). "
+        "List ONLY the sub-questions OR the parent — NEVER both.\n\n"
+        f"{_RUBRIC_QUALITY_RULES}\n"
+        "Output ONE line per question:\n"
+        "    Q<num> (<X> marks): <detailed mark-point criteria>\n\n"
+        "VERIFY: sum of marks in rubric must equal total_marks.\n\n"
         "Return STRICT JSON only:\n"
-        "{ \"rubric\": string (multi-line), \"questions_found\": int, \"total_marks\": int }\n\n"
+        '{ "rubric": string, "questions_found": int, "total_marks": int }\n\n'
         f"Question paper text:{truncated_note}\n\"\"\"\n{paper}\n\"\"\""
     )
     content = _groq_chat_with_retry(
@@ -193,29 +298,64 @@ def generate_rubric_from_questions(question_paper_text: str) -> dict[str, Any]:
             {"role": "user",   "content": prompt},
         ],
         temperature=0.2,
-        max_tokens=2000,
+        max_tokens=3500,
         response_format={"type": "json_object"},
     )
     out = _extract_json(content)
     out["rubric"] = str(out.get("rubric", "")).strip()
     out["questions_found"] = int(out.get("questions_found") or 0)
     out["total_marks"] = int(out.get("total_marks") or 0)
+    # Fallback: count Q-lines in rubric when model returns 0
+    if out["questions_found"] == 0 and out["rubric"]:
+        counted = len(re.findall(r"^\s*Q\d+[\.\(]", out["rubric"], re.MULTILINE))
+        if counted:
+            out["questions_found"] = counted
     out = _correct_total_marks(out, question_paper_text)
+    # Always include paper metadata extracted from header
+    meta = extract_paper_metadata(question_paper_text)
+    out["paper_grade"]   = meta["grade"]
+    out["paper_subject"] = meta["subject"]
+    out["paper_board"]   = meta["board"]
+    # If total_marks was corrected by declared value, meta may also have it
+    if not out.get("total_marks") and meta.get("total_marks"):
+        out["total_marks"] = meta["total_marks"]
     return out
+
+
+_RUBRIC_QUALITY_RULES = """\
+HOW TO WRITE EACH RUBRIC LINE — QUALITY IS CRITICAL:
+=====================================================
+A bad rubric line:  Q1 (5 marks): explain photosynthesis
+A good rubric line: Q1 (5 marks): define photosynthesis (1m) + light/dark reactions named (1m) + role of chlorophyll (1m) + ATP/glucose as products (1m) + balanced equation or diagram with labels (1m)
+
+Rules for EVERY question:
+1. MARK-POINT BREAKDOWN: For questions ≥ 3 marks, split into individual mark points using (1m) notation.
+   Example: Q3 (4 marks): two laws of motion stated correctly (2m) + one numerical example with working (1m) + SI units correct (1m)
+2. SPECIFIC CONTENT: Name the actual terms, formulas, facts, examples, or steps the student must include.
+   BAD: "explain the process"  GOOD: "steps: prophase → metaphase → anaphase → telophase named (4m)"
+3. MCQ/OBJECTIVE: For 1-mark questions, state the correct answer directly.
+   Q2 (1 mark): correct answer — photosynthesis occurs in chloroplast
+4. DIAGRAMS: If a question asks for a diagram, specify: "labelled diagram with at least 4 parts named (Xm)"
+5. LONG ANSWERS: List ALL the expected points, sub-headings, or steps. Do not summarise into one phrase.
+6. COMPREHENSION PASSAGES: List the specific facts or inferences needed from the passage.
+Do NOT write vague rubric lines — a vague rubric produces poor grading.
+"""
 
 
 def _generate_rubric_gemini(paper_text: str) -> dict[str, Any]:
     """Single-call rubric generation via Gemini 2.5 Flash (1M context, fast).
     No chunking needed — feeds the entire paper in one prompt."""
     prompt = (
-        "You are a CBSE teacher building a marking rubric from this question paper.\n\n"
+        "You are a CBSE senior examiner writing a DETAILED marking rubric from this question paper.\n\n"
         "🎯 TOTAL MARKS RULE: Find 'Maximum Marks: NN' at the top — your total_marks "
         "MUST equal that value EXACTLY (could be 30, 50, 80, 100, 120, 150 — use the "
         "declared number, not a guess).\n\n"
         "🚫 ANTI-DOUBLE-COUNT: If you see 'Q1 [10 marks]' broken into 'Q1.1, Q1.2, …', "
         "list ONLY the sub-questions OR only the parent — never both.\n\n"
-        "For EACH question (no skipping, all sections A-E), output ONE concise rubric line:\n"
-        "    Q<num> (<X> marks): expected key points (max 15 words)\n\n"
+        f"{_RUBRIC_QUALITY_RULES}\n"
+        "Output format — ONE line per question:\n"
+        "    Q<num> (<X> marks): <detailed mark-point-by-mark-point criteria>\n\n"
+        "Cover ALL questions across ALL sections (A, B, C, D, E). Do not skip any.\n\n"
         "Return STRICT JSON only:\n"
         '{ "rubric": "multi-line string", "questions_found": int, "total_marks": int }\n\n'
         f"Question paper text:\n\"\"\"\n{paper_text[:200000]}\n\"\"\""
@@ -226,7 +366,7 @@ def _generate_rubric_gemini(paper_text: str) -> dict[str, Any]:
         config=gtypes.GenerateContentConfig(
             response_mime_type="application/json",
             temperature=0.2,
-            max_output_tokens=8192,
+            max_output_tokens=32768,
         ),
     )
     raw = rsp.text or ""
@@ -239,8 +379,11 @@ def _generate_rubric_gemini(paper_text: str) -> dict[str, Any]:
         total_m = re.search(r'"total_marks"\s*:\s*(\d+)', raw)
         qf_m = re.search(r'"questions_found"\s*:\s*(\d+)', raw)
         if rubric_m:
+            rubric_raw = rubric_m.group(1)
+            # Unescape \n, \t — avoid full unicode_escape which breaks on non-ASCII
+            rubric_text = rubric_raw.replace("\\n", "\n").replace("\\t", "\t").replace('\\"', '"').replace("\\\\", "\\")
             out = {
-                "rubric": rubric_m.group(1).encode("utf-8").decode("unicode_escape", errors="ignore"),
+                "rubric": rubric_text,
                 "questions_found": int(qf_m.group(1)) if qf_m else 0,
                 "total_marks": int(total_m.group(1)) if total_m else 0,
             }
@@ -249,6 +392,11 @@ def _generate_rubric_gemini(paper_text: str) -> dict[str, Any]:
     out["rubric"] = str(out.get("rubric", "")).strip()
     out["questions_found"] = int(out.get("questions_found") or 0)
     out["total_marks"] = int(out.get("total_marks") or 0)
+    # Fallback: if model said 0 questions but rubric has Q-lines, count them
+    if out["questions_found"] == 0 and out["rubric"]:
+        counted = len(re.findall(r"^\s*Q\d+[\.\(]", out["rubric"], re.MULTILINE))
+        if counted:
+            out["questions_found"] = counted
     return out
 
 
@@ -279,16 +427,16 @@ def _generate_rubric_chunked(full_text: str, chunks: list[str], model: str) -> d
     for i, chunk in enumerate(chunks):
         chunk_prompt = (
             f"You are reading PART {i+1}/{len(chunks)} of a multi-page CBSE question paper.\n\n"
-            "For EVERY numbered question in THIS PART, output ONE SHORT rubric line:\n"
-            "    Q<num> (<X> marks): brief key points (max 15 words)\n\n"
+            "Write a DETAILED marking rubric for every question in this part.\n\n"
+            f"{_RUBRIC_QUALITY_RULES}\n"
             "Rules:\n"
-            "  - KEEP EACH LINE UNDER 15 WORDS — concise, not verbose.\n"
             "  - Use the mark allocation visible in the text ([5 marks], (3), 5M).\n"
-            "  - If you see a parent Q with sub-questions, list the sub-questions only — "
-            "do NOT double-count by listing both.\n"
-            "  - Skip section headers and instructions; only emit Q lines for actual questions.\n\n"
+            "  - Sub-questions only — never list both parent and sub-questions.\n"
+            "  - Skip section headers/instructions; only emit Q lines for actual questions.\n\n"
+            "Output ONE line per question:\n"
+            "    Q<num> (<X> marks): <detailed mark-point criteria>\n\n"
             "Return STRICT JSON only:\n"
-            "{ \"rubric_lines\": [string, …], \"questions_found\": int, \"chunk_marks\": int }\n\n"
+            '{ "rubric_lines": [string], "questions_found": int, "chunk_marks": int }\n\n'
             f"Paper part {i+1}/{len(chunks)}:\n\"\"\"\n{chunk}\n\"\"\""
         )
         content = _groq_chat_with_retry(
@@ -298,7 +446,7 @@ def _generate_rubric_chunked(full_text: str, chunks: list[str], model: str) -> d
                 {"role": "user",   "content": chunk_prompt},
             ],
             temperature=0.2,
-            max_tokens=2500,
+            max_tokens=4000,
             response_format={"type": "json_object"},
         )
         part = _extract_json(content)
@@ -375,6 +523,10 @@ def detect_scope(student_answer: str, rubric: str = "") -> dict[str, Any]:
 
 def grade_text(system_prompt: str, student_answer: str) -> dict[str, Any]:
     model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    # Estimate tokens needed: ~80 tokens per question in per_question array.
+    # Count questions in rubric (lines starting with Q) and set a floor of 2000.
+    q_count = len(re.findall(r"^\s*Q\d", system_prompt, re.MULTILINE))
+    max_tokens = max(2000, q_count * 100 + 1000)
     content = _groq_chat_with_retry(
         model,
         messages=[
@@ -382,7 +534,7 @@ def grade_text(system_prompt: str, student_answer: str) -> dict[str, Any]:
             {"role": "user",   "content": f"Student answer:\n\n{student_answer}"},
         ],
         temperature=0.2,
-        max_tokens=900,
+        max_tokens=max_tokens,
         response_format={"type": "json_object"},
     )
     return _extract_json(content)
@@ -463,6 +615,32 @@ def make_study_plan(grade_result: dict[str, Any], grade_level: int,
     return [str(p) for p in plan][:3]
 
 
+def ncert_validate(student_answer: str, grade: int, subject: str, chapter: str,
+                   system_prompt: str) -> dict[str, Any]:
+    """Check if the student's answer content aligns with NCERT books for the
+    detected grade/subject/chapter. Uses the AI's built-in NCERT knowledge.
+    Returns a structured report with ncert_alignment_score, issues, etc."""
+    model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    content = _groq_chat_with_retry(
+        model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": f"Student answer sheet (Grade {grade} {subject}):\n\n{student_answer[:4000]}"},
+        ],
+        temperature=0.1,
+        max_tokens=1200,
+        response_format={"type": "json_object"},
+    )
+    out = _extract_json(content)
+    # Ensure required fields exist
+    out.setdefault("ncert_alignment_score", 0)
+    out.setdefault("syllabus_match", "unknown")
+    out.setdefault("is_ncert_paper", False)
+    out.setdefault("ncert_issues", [])
+    out.setdefault("overall_comment", "")
+    return out
+
+
 def verify_grade(student_answer: str, rubric: str, grade_result: dict[str, Any]) -> dict[str, Any]:
     model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
     critic = (
@@ -520,11 +698,11 @@ def _is_quota(msg: str) -> bool:
 
 def groq_vision_ocr(image_bytes_list: list[bytes], prompt: str,
                     mime: str = "image/png") -> str:
-    """Vision OCR via Groq's Llama 4 Scout (multimodal). Up to 5 images per call.
+    """Vision OCR via Groq's Llama 3.2 vision (multimodal). Up to 5 images per call.
     Used as fallback when Gemini quota is exhausted."""
     import base64
 
-    model = os.getenv("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+    model = os.getenv("GROQ_VISION_MODEL", "llama-3.2-11b-vision-preview")
     content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
     for img in image_bytes_list[:5]:  # Groq vision caps at ~5 images per request
         b64 = base64.b64encode(img).decode("ascii")
@@ -552,9 +730,30 @@ def gemini_ocr(image_bytes: bytes, mime: str = "image/jpeg",
     import time
 
     if prompt is None:
-        prompt = ("Transcribe this answer sheet VERBATIM. Preserve line breaks. "
-                  "If a student name is at the top, put it on the first line. "
-                  "Plain text only — no commentary.")
+        prompt = (
+            "You are reading a student's handwritten answer sheet. Extract ALL content accurately.\n\n"
+            "TEXT: Transcribe handwritten text verbatim — keep spelling errors, grammar mistakes, "
+            "abbreviations exactly as written.\n\n"
+            "DIAGRAMS / DRAWINGS / FLOWCHARTS: If the student drew a diagram, figure, flowchart "
+            "or mind-map, write:\n"
+            "  [DIAGRAM: <describe what is drawn in one line>. Labels visible: <list every word, "
+            "arrow label, or annotation written on the diagram>]\n"
+            "  This is very important — a diagram IS a valid answer and must not be skipped.\n\n"
+            "TABLES: If the student drew a table or comparison chart, preserve it using | column "
+            "separators. Example:\n"
+            "  | Feature | Plant Cell | Animal Cell |\n"
+            "  | Cell wall | Present | Absent |\n\n"
+            "MATHEMATICAL EXPRESSIONS: Write equations and formulas clearly. Use ^ for powers, "
+            "* for multiplication, / for division, sqrt() for roots. Example: a^2 + b^2 = c^2, "
+            "F = ma, v = u + at.\n\n"
+            "NUMBERED/BULLET LISTS: Preserve the numbering or bullets. If a student wrote 1. 2. 3. "
+            "or used dashes, keep that structure.\n\n"
+            "MIXED LANGUAGE (Hinglish): If the student wrote a mix of Hindi and English, transcribe "
+            "exactly as written. Do NOT translate. Hindi words written in English script "
+            "(e.g. 'photosynthesis ko prakaash sangleshan kehte hain') are valid answers.\n\n"
+            "If a student name is at the top, put 'Name: <name>' on the first line.\n"
+            "Plain text output only — no commentary, no markdown fences."
+        )
     parts = [gtypes.Part.from_bytes(data=image_bytes, mime_type=mime), prompt]
 
     last_err = None

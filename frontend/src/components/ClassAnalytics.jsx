@@ -28,17 +28,21 @@ export default function ClassAnalytics({ results, analytics }) {
   const graded = results.filter(r => r.ok)
   if (!graded.length) return null
 
+  const clampPct = r => Math.min(100, Math.max(0, r.percentage ?? 0))
   const buckets = BUCKETS.map(b => ({
     ...b,
-    count: graded.filter(r => (r.percentage ?? 0) >= b.min && (r.percentage ?? 0) <= b.max).length,
+    count: graded.filter(r => clampPct(r) >= b.min && clampPct(r) <= b.max).length,
   }))
   const maxCount = Math.max(...buckets.map(b => b.count), 1)
   const total = graded.length
 
   // Find the dominant bucket and dominant mistake for a one-line takeaway
-  const topBucket   = buckets.slice().sort((a, b) => b.count - a.count)[0]
+  const avgPercent    = Math.min(100, analytics?.average_percentage ?? 0)
+  const sorted        = buckets.slice().sort((a, b) => b.count - a.count)
+  const topBucket     = sorted[0].count > 0
+    ? sorted[0]
+    : BUCKETS.find(b => avgPercent >= b.min && avgPercent <= b.max) ?? BUCKETS[BUCKETS.length - 1]
   const topMistake  = analytics?.top_mistakes?.[0]
-  const avgPercent  = analytics?.average_percentage ?? 0
 
   return (
     <div className="card analytics-card">
