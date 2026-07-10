@@ -123,7 +123,7 @@ def _get_collection():
         _collection = _client.get_collection(_COLLECTION_NAME)
         print(f"[ncert_rag] loaded existing collection ({_collection.count()} chapters)")
     except Exception:
-        print(f"[ncert_rag] building collection from cbse_kb…")
+        print(f"[ncert_rag] building collection from cbse_kb...")
         _collection = _client.create_collection(_COLLECTION_NAME)
         _ingest_all_chapters(_collection)
         print(f"[ncert_rag] ingested {_collection.count()} chapters into Chroma")

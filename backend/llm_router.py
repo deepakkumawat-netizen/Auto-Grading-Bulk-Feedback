@@ -22,9 +22,24 @@ _groq_client: Groq | None = None
 _gemini_client: genai.Client | None = None
 
 
+def _safe_int(val: Any, default: int = 0) -> int:
+    if val is None:
+        return default
+    if isinstance(val, (int, float)):
+        return int(val)
+    if isinstance(val, str):
+        val = val.strip()
+        try:
+            return int(float(val))
+        except ValueError:
+            match = re.search(r"\d+", val)
+            if match:
+                return int(match.group())
+    return default
+
+
 _GROQ_TEXT_CHAIN = [
     "llama-3.3-70b-versatile",   # smartest, lowest TPM cap — primary
-    "mixtral-8x7b-32768",        # comparable quality, separate TPM bucket
     "llama-3.1-8b-instant",      # last-resort: 8× higher TPM but may over-count marks
 ]
 
@@ -52,16 +67,28 @@ def _gemini_text_fallback(messages, *, max_tokens: int, temperature: float = 0.2
     prompt += "\n".join(usr_parts)
 
     want_json = bool(response_format and response_format.get("type") == "json_object")
-    cfg_kwargs = dict(temperature=temperature, max_output_tokens=max_tokens)
+    cfg_kwargs = dict(temperature=temperature, maxOutputTokens=max(8192, max_tokens))
     if want_json:
-        cfg_kwargs["response_mime_type"] = "application/json"
+        cfg_kwargs["responseMimeType"] = "application/json"
+        cfg_kwargs["thinkingConfig"] = gtypes.ThinkingConfig(thinkingBudget=0)
 
-    rsp = _gemini().models.generate_content(
-        model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
-        contents=[prompt],
-        config=gtypes.GenerateContentConfig(**cfg_kwargs),
-    )
-    return rsp.text or ""
+    last_err = None
+    for model in _gemini_model_chain():
+        try:
+            rsp = _gemini().models.generate_content(
+                model=model,
+                contents=[prompt],
+                config=gtypes.GenerateContentConfig(**cfg_kwargs),
+            )
+            return rsp.text or ""
+        except Exception as e:
+            last_err = e
+            msg = str(e).lower()
+            if _is_quota(msg):
+                print(f"[gemini-text-fallback {model}] quota exhausted, trying next Gemini model...")
+                continue
+            raise e
+    raise last_err
 
 
 def _groq_chat_with_retry(model: str, messages, *, max_tokens: int,
@@ -87,7 +114,7 @@ def _groq_chat_with_retry(model: str, messages, *, max_tokens: int,
                 rsp = _groq().chat.completions.create(**kwargs)
                 if m != model:
                     print(f"[groq] WARN used fallback model {m} (primary {model} was rate-limited). "
-                          "Marks may be over-counted — verify the rubric carefully.")
+                          "Marks may be over-counted - verify the rubric carefully.")
                 return rsp.choices[0].message.content or ""
             except Exception as e:
                 msg = str(e); last_err = e
@@ -96,16 +123,16 @@ def _groq_chat_with_retry(model: str, messages, *, max_tokens: int,
                         or "Request too large" in msg):
                     if attempt + 1 < max_attempts:
                         wait = _parse_retry_after(msg)
-                        print(f"[groq {m}] rate-limited (attempt {attempt+1}/{max_attempts}), waiting {wait:.1f}s then retrying same model…")
+                        print(f"[groq {m}] rate-limited (attempt {attempt+1}/{max_attempts}), waiting {wait:.1f}s then retrying same model...")
                         _time.sleep(wait)
                         continue
-                    print(f"[groq {m}] still rate-limited after {max_attempts} tries — falling to next model")
+                    print(f"[groq {m}] still rate-limited after {max_attempts} tries - falling to next model")
                     break
                 else:
-                    print(f"[groq {m}] failed with error ({e}) — falling to next model")
+                    print(f"[groq {m}] failed with error ({e}) - falling to next model")
                     break
-    # All Groq models exhausted — fall back to Gemini (separate quota bucket)
-    print(f"[groq→gemini] All Groq models rate-limited. Falling back to Gemini 2.5 Flash. Last Groq err: {last_err}")
+    # All Groq models exhausted - fall back to Gemini (separate quota bucket)
+    print(f"[groq->gemini] All Groq models rate-limited. Falling back to Gemini 2.5 Flash. Last Groq err: {last_err}")
     try:
         return _gemini_text_fallback(messages, max_tokens=max_tokens,
                                       temperature=temperature,
@@ -130,20 +157,128 @@ def _gemini() -> genai.Client:
     if _gemini_client is None:
         key = os.getenv("GEMINI_API_KEY", "").strip()
         if not key: raise RuntimeError("GEMINI_API_KEY not set")
-        _gemini_client = genai.Client(api_key=key)
+        _gemini_client = genai.Client(
+            api_key=key,
+            http_options=gtypes.HttpOptions(
+                retry_options=gtypes.HttpRetryOptions(attempts=1)
+            )
+        )
     return _gemini_client
+
+
+def _repair_json_quotes(raw: str) -> str:
+    n = len(raw)
+    chars = list(raw)
+    out = []
+    
+    for i in range(n):
+        c = chars[i]
+        if c == '"':
+            # Count backslashes before it
+            bs_count = 0
+            k = i - 1
+            while k >= 0 and chars[k] == '\\':
+                bs_count += 1
+                k -= 1
+            if bs_count % 2 == 1:
+                # It is escaped, just append it
+                out.append('"')
+                continue
+                
+            # Find previous non-whitespace char
+            prev_char = ""
+            for k in range(i - 1, -1, -1):
+                if not chars[k].isspace():
+                    prev_char = chars[k]
+                    break
+            # Find next non-whitespace char
+            next_char = ""
+            next_idx = -1
+            for k in range(i + 1, n):
+                if not chars[k].isspace():
+                    next_char = chars[k]
+                    next_idx = k
+                    break
+                    
+            # Determine if structural
+            is_structural = False
+            if prev_char in ('{', '[', ':'):
+                is_structural = True
+            elif next_char in ('}', ']', ':'):
+                is_structural = True
+            elif next_char == ',':
+                is_structural = True
+            elif prev_char == ',':
+                # Preceded by comma. Could be starting a key like: , "key":
+                # Check if this quote is followed by a string key ending with a quote and then a colon
+                has_colon = False
+                for k in range(i + 1, n):
+                    if chars[k] == '"' and chars[k-1] != '\\':
+                        # Check if followed by colon
+                        for m in range(k + 1, n):
+                            if not chars[m].isspace():
+                                if chars[m] == ':':
+                                    has_colon = True
+                                break
+                        break
+                if has_colon:
+                    is_structural = True
+                else:
+                    # Could be an array element
+                    # Let's check if there is a colon before the comma
+                    is_array_element = True
+                    for k in range(i - 1, -1, -1):
+                        if chars[k] == ':':
+                            is_array_element = False
+                            break
+                        elif chars[k] in ('{', '}'):
+                            break
+                    if is_array_element:
+                        is_structural = True
+            
+            if is_structural:
+                out.append('"')
+            else:
+                out.append('\\"')
+        else:
+            out.append(c)
+            
+    return "".join(out)
 
 
 def _extract_json(raw: str) -> dict[str, Any]:
     if not raw: raise ValueError("empty model output")
     fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
-    if fenced: return json.loads(fenced.group(1))
-    brace = re.search(r"\{.*\}", raw, re.DOTALL)
-    if brace: return json.loads(brace.group(0))
-    return json.loads(raw)
+    if fenced:
+        content = fenced.group(1)
+    else:
+        brace = re.search(r"\{.*\}", raw, re.DOTALL)
+        content = brace.group(0) if brace else raw
+        
+    try:
+        return json.loads(content)
+    except Exception as e:
+        print(f"[_extract_json] standard JSON load failed: {e}. Attempting to repair quotes...")
+        repaired = ""
+        try:
+            repaired = _repair_json_quotes(content)
+            return json.loads(repaired)
+        except Exception as e2:
+            print(f"[_extract_json] JSON repair failed: {e2}")
+            # Save debug files
+            try:
+                with open("failed_grader_response.json", "w", encoding="utf-8") as f:
+                    f.write(content)
+                if repaired:
+                    with open("failed_repaired_response.json", "w", encoding="utf-8") as f:
+                        f.write(repaired)
+            except Exception as ef:
+                print(f"Failed to write debug files: {ef}")
+            # If repair fails, fall back to the original json.loads(content) to throw the clear error
+            return json.loads(content)
 
 
-_RUBRIC_CHUNK_CHARS = 6000  # ~1500 tokens — keeps output bounded
+_RUBRIC_CHUNK_CHARS = 3000  # ~750 tokens — keeps output bounded and fits comfortably in Groq TPM limits
 
 
 def _chunk_paper_by_questions(text: str, max_chars: int) -> list[str]:
@@ -159,78 +294,23 @@ def _chunk_paper_by_questions(text: str, max_chars: int) -> list[str]:
     boundaries.append(len(text))
     chunks, cur_start = [], 0
     for b in boundaries[1:]:
-        if b - cur_start > max_chars:
+        while b - cur_start > max_chars:
             chunks.append(text[cur_start:cur_start + max_chars])
             cur_start = cur_start + max_chars
-        if b - cur_start >= max_chars * 0.5 or b == len(text):
+        if b - cur_start >= max_chars * 0.3 or b == len(text):
             chunks.append(text[cur_start:b])
             cur_start = b
     return [c for c in chunks if c.strip()]
 
 
 def extract_paper_metadata(paper_text: str) -> dict[str, Any]:
-    """Extract grade, subject, board, and total_marks from a CBSE question paper header.
-    Uses regex — no LLM call needed. The paper header always has this info printed.
+    """Extract board and total_marks from a CBSE question paper header.
+    Subject and Grade detection is explicitly disabled and must be selected manually.
 
-    Returns: { grade: int|None, subject: str, board: str, total_marks: int|None }
+    Returns: { grade: None, subject: "", board: str, total_marks: int|None }
     """
     # Take first 800 chars — the header is always at the top
     header = paper_text[:800]
-
-    # Grade: "Class X", "Class 10", "Std XII", "Grade 10"
-    grade = None
-    gm = re.search(
-        r'(?:class|std\.?|grade)\s*[:\-]?\s*([IVXLCDM]+|\d{1,2})\b',
-        header, re.IGNORECASE,
-    )
-    if gm:
-        raw_g = gm.group(1).strip().upper()
-        roman = {"I":1,"II":2,"III":3,"IV":4,"V":5,"VI":6,"VII":7,"VIII":8,
-                 "IX":9,"X":10,"XI":11,"XII":12}
-        grade = roman.get(raw_g) or (int(raw_g) if raw_g.isdigit() else None)
-        if grade:
-            grade = max(1, min(12, grade))
-
-    # Subject: check paper text (first 2000 chars) — not just 800 — for more reliable detection.
-    # Step 1: explicit "Subject: ..." label (most reliable)
-    scan_zone = paper_text[:2000].lower()
-    subject = ""
-    sm = re.search(r'subject\s*[:\-]\s*([A-Za-z ()]{3,50})', paper_text[:2000], re.IGNORECASE)
-    if sm:
-        raw_sub = sm.group(1).strip().title()
-        # Normalize CBSE variants like "Mathematics (Standard)" → "Mathematics"
-        for canonical in ["Mathematics","Science","Physics","Chemistry","Biology",
-                          "English","Hindi","Social Science","Sanskrit","Computer Science"]:
-            if canonical.lower() in raw_sub.lower():
-                subject = canonical
-                break
-        if not subject:
-            subject = raw_sub
-
-    if not subject:
-        # Score-based keyword match across the top section of the paper.
-        # Multi-word phrases checked before single words to avoid false positives.
-        _SUBJ_SCORED = [
-            ("Mathematics", [("mathematics standard",10),("mathematics basic",10),
-                             ("mathematics",8),("maths",8),("math",6)]),
-            ("Social Science", [("social science",8),("sst",6),("history",4),
-                                ("geography",4),("civics",4)]),
-            ("Computer Science", [("computer science",8),("informatics",6)]),
-            ("Science",      [("general science",8),("science",6)]),
-            ("Physics",      [("physics",8)]),
-            ("Chemistry",    [("chemistry",8)]),
-            ("Biology",      [("biology",8)]),
-            ("English",      [("english",8)]),
-            ("Hindi",        [("hindi",8)]),
-            ("Sanskrit",     [("sanskrit",8)]),
-        ]
-        scores: dict[str, int] = {}
-        for subj, kw_list in _SUBJ_SCORED:
-            total = sum(w for kw, w in kw_list if kw in scan_zone)
-            if total:
-                scores[subj] = total
-        if scores:
-            subject = max(scores, key=scores.__getitem__)
 
     # Board
     board = ""
@@ -245,14 +325,14 @@ def extract_paper_metadata(paper_text: str) -> dict[str, Any]:
 
     # Total marks (scan full header section)
     total_marks = None
-    tm = re.search(r'(?:maximum|total|max\.?)\s*marks?\s*[:\-]?\s*(\d{2,4})', paper_text[:2000], re.IGNORECASE)
+    tm = re.search(r'(?:maximum|total|max\.?|पूर्णांक|कुल\s*अंक|अधिकतम\s*अंक)\s*(?:marks?|अंक)?\s*[:\-]?\s*(\d{2,4})', paper_text[:2000], re.IGNORECASE)
     if tm:
         total_marks = int(tm.group(1))
 
-    return {"grade": grade, "subject": subject, "board": board, "total_marks": total_marks}
+    return {"grade": None, "subject": "", "board": board, "total_marks": total_marks}
 
 
-def generate_rubric_from_questions(question_paper_text: str) -> dict[str, Any]:
+def generate_rubric_from_questions(question_paper_text: str, solution_key_text: str = "") -> dict[str, Any]:
     """Read a question paper (extracted text) and produce a teacher-ready rubric.
 
     🚀 Tries Gemini 2.5 Flash FIRST — 1M context, generous free tier, handles
@@ -263,19 +343,29 @@ def generate_rubric_from_questions(question_paper_text: str) -> dict[str, Any]:
     """
     # Try Gemini first — fastest path for long papers
     try:
-        out = _generate_rubric_gemini(question_paper_text)
+        out = _generate_rubric_gemini(question_paper_text, solution_key_text)
+        out = _recalculate_rubric_stats(out)
         return _correct_total_marks(out, question_paper_text)
     except Exception as e:
-        print(f"[rubric] Gemini path failed ({e}) — falling back to Groq chunked pipeline")
+        print(f"[rubric] Gemini path failed ({e}) - falling back to Groq chunked pipeline")
 
     # Fallback: Groq with chunking
     model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-    chunks = _chunk_paper_by_questions(question_paper_text, _RUBRIC_CHUNK_CHARS)
-    if len(chunks) > 1:
-        print(f"[rubric] Groq fallback — splitting {len(question_paper_text)} chars "
-              f"into {len(chunks)} chunks to fit TPM window.")
-        return _generate_rubric_chunked(question_paper_text, chunks, model)
-    paper = chunks[0]
+    combined_len = len(question_paper_text) + len(solution_key_text)
+    
+    paper_chunks = _chunk_paper_by_questions(question_paper_text, _RUBRIC_CHUNK_CHARS)
+    sol_chunks = _chunk_paper_by_questions(solution_key_text, _RUBRIC_CHUNK_CHARS) if solution_key_text else []
+    
+    num_chunks = max(len(paper_chunks), len(sol_chunks))
+    
+    if num_chunks > 1 or combined_len > 12000:
+        # Pad chunks to match count so we send corresponding parts of paper and solution
+        paper_chunks_padded = paper_chunks + [""] * (num_chunks - len(paper_chunks))
+        sol_chunks_padded = sol_chunks + [""] * (num_chunks - len(sol_chunks))
+        print(f"[rubric] Groq fallback - splitting {combined_len} chars into {num_chunks} chunks to fit TPM window.")
+        return _generate_rubric_chunked(question_paper_text, paper_chunks_padded, model, sol_chunks_padded)
+        
+    paper = paper_chunks[0] if paper_chunks else question_paper_text
     truncated_note = ""
     prompt = (
         "You are a CBSE senior examiner writing a DETAILED marking rubric from a question paper.\n\n"
@@ -284,6 +374,18 @@ def generate_rubric_from_questions(question_paper_text: str) -> dict[str, Any]:
         "🚫 ANTI-DOUBLE-COUNT: Sub-questions (Q1.1, Q1.2) already sum to the parent (Q1). "
         "List ONLY the sub-questions OR the parent — NEVER both.\n\n"
         f"{_RUBRIC_QUALITY_RULES}\n"
+    )
+    if solution_key_text:
+        prompt += (
+            "🔑 TEACHER'S SOLUTION KEY / ANSWER KEY:\n"
+            "You have been provided with the teacher's official solution key / answer key below. "
+            "You MUST use the solutions, steps, and correct answers from this key to write the "
+            "detailed marking rubric criteria. Map each solution back to its corresponding question.\n"
+            "\"\"\"\n"
+            f"{solution_key_text}\n"
+            "\"\"\"\n\n"
+        )
+    prompt += (
         "Output ONE line per question:\n"
         "    Q<num> (<X> marks): <detailed mark-point criteria>\n\n"
         "VERIFY: sum of marks in rubric must equal total_marks.\n\n"
@@ -291,25 +393,50 @@ def generate_rubric_from_questions(question_paper_text: str) -> dict[str, Any]:
         '{ "rubric": string, "questions_found": int, "total_marks": int }\n\n'
         f"Question paper text:{truncated_note}\n\"\"\"\n{paper}\n\"\"\""
     )
-    content = _groq_chat_with_retry(
-        model,
-        messages=[
-            {"role": "system", "content": "You return only valid JSON."},
-            {"role": "user",   "content": prompt},
-        ],
-        temperature=0.2,
-        max_tokens=3500,
-        response_format={"type": "json_object"},
-    )
-    out = _extract_json(content)
+    
+    content = ""
+    try:
+        content = _groq_chat_with_retry(
+            model,
+            messages=[
+                {"role": "system", "content": "You return only valid JSON."},
+                {"role": "user",   "content": prompt},
+            ],
+            temperature=0.2,
+            max_tokens=3500,
+            response_format={"type": "json_object"},
+        )
+        out = _extract_json(content)
+    except Exception as je:
+        print(f"[rubric] Single-call JSON parsing failed: {je}. Attempting regex salvage...")
+        rubric_m = re.search(r'"rubric"\s*:\s*"((?:[^"\\]|\\.)*)', content, re.DOTALL) if content else None
+        total_m = re.search(r'"total_marks"\s*:\s*(\d+)', content) if content else None
+        qf_m = re.search(r'"questions_found"\s*:\s*(\d+)', content) if content else None
+        if rubric_m:
+            rubric_raw = rubric_m.group(1)
+            rubric_text = rubric_raw.replace("\\n", "\n").replace("\\t", "\t").replace('\\"', '"').replace("\\\\", "\\")
+            out = {
+                "rubric": rubric_text,
+                "questions_found": _safe_int(qf_m.group(1)) if qf_m else 0,
+                "total_marks": _safe_int(total_m.group(1)) if total_m else 0,
+            }
+        else:
+            lines = re.findall(r"^\s*(Q\d+[\w\.]*\s*\(.*?\)\s*:.*?)$", content, re.MULTILINE)
+            out = {
+                "rubric": "\n".join(lines),
+                "questions_found": len(lines),
+                "total_marks": 0
+            }
+            
     out["rubric"] = str(out.get("rubric", "")).strip()
-    out["questions_found"] = int(out.get("questions_found") or 0)
-    out["total_marks"] = int(out.get("total_marks") or 0)
+    out["questions_found"] = _safe_int(out.get("questions_found") or 0)
+    out["total_marks"] = _safe_int(out.get("total_marks") or 0)
     # Fallback: count Q-lines in rubric when model returns 0
     if out["questions_found"] == 0 and out["rubric"]:
         counted = len(re.findall(r"^\s*Q\d+[\.\(]", out["rubric"], re.MULTILINE))
         if counted:
             out["questions_found"] = counted
+    out = _recalculate_rubric_stats(out)
     out = _correct_total_marks(out, question_paper_text)
     # Always include paper metadata extracted from header
     meta = extract_paper_metadata(question_paper_text)
@@ -323,26 +450,22 @@ def generate_rubric_from_questions(question_paper_text: str) -> dict[str, Any]:
 
 
 _RUBRIC_QUALITY_RULES = """\
-HOW TO WRITE EACH RUBRIC LINE — QUALITY IS CRITICAL:
+HOW TO WRITE THE RUBRIC LINES:
 =====================================================
-A bad rubric line:  Q1 (5 marks): explain photosynthesis
-A good rubric line: Q1 (5 marks): define photosynthesis (1m) + light/dark reactions named (1m) + role of chlorophyll (1m) + ATP/glucose as products (1m) + balanced equation or diagram with labels (1m)
+You MUST structure the rubric lines based on the questions and marks found in the Question Paper.
 
-Rules for EVERY question:
-1. MARK-POINT BREAKDOWN: For questions ≥ 3 marks, split into individual mark points using (1m) notation.
-   Example: Q3 (4 marks): two laws of motion stated correctly (2m) + one numerical example with working (1m) + SI units correct (1m)
-2. SPECIFIC CONTENT: Name the actual terms, formulas, facts, examples, or steps the student must include.
-   BAD: "explain the process"  GOOD: "steps: prophase → metaphase → anaphase → telophase named (4m)"
-3. MCQ/OBJECTIVE: For 1-mark questions, state the correct answer directly.
-   Q2 (1 mark): correct answer — photosynthesis occurs in chloroplast
-4. DIAGRAMS: If a question asks for a diagram, specify: "labelled diagram with at least 4 parts named (Xm)"
-5. LONG ANSWERS: List ALL the expected points, sub-headings, or steps. Do not summarise into one phrase.
-6. COMPREHENSION PASSAGES: List the specific facts or inferences needed from the passage.
-Do NOT write vague rubric lines — a vague rubric produces poor grading.
+Rules:
+1. STRUCTURE FROM QUESTION PAPER: Formulate the list of questions, question numbers (e.g. Q1, Q2, Q3), and their mark allocations strictly from the Question Paper. Do NOT omit questions present in the Question Paper.
+   - ⚠️ IMPORTANT: If a question has sub-parts (e.g. Question 1 has parts (i), (ii) or (a), (b)), you MUST prefix the sub-part with the parent question number. Write "Q1(i)" or "Q1(a)", NOT "Q(i)" or "Q(a)". Always maintain the correct question prefix.
+2. ANSWER KEY INTEGRATION: For each question, look up the correct answers, steps, and key points from the provided teacher's Solution Key / Answer Key. Do NOT invent your own correct answers.
+3. HANDLE MISSING OR REPETITIVE ANSWER KEY DETAILS: If the Solution Key / Answer Key contains repetitive generic text (like "व्याकरणिक विश्लेषण...") or is missing specific answers for a question, write a clear, specific marking rubric based on the actual question text from the Question Paper.
+4. SPECIFICITY: Every rubric line MUST specify the exact question content (e.g., "Evaluate sin 60 cos 30 + sin 30 cos 60" or "Prove that 2 - sqrt(3) is irrational") and the step-by-step mark breakdown, not just generic guidelines.
+5. LANGUAGE CONSISTENCY: You MUST write the rubric description, questions, and marking criteria in the SAME language as the original question from the Question Paper. If a question is written in Hindi, the rubric description and marking criteria for that question MUST be written in Hindi. Do NOT translate Hindi questions or criteria to English.
 """
 
 
-def _generate_rubric_gemini(paper_text: str) -> dict[str, Any]:
+
+def _generate_rubric_gemini(paper_text: str, solution_key_text: str = "") -> dict[str, Any]:
     """Single-call rubric generation via Gemini 2.5 Flash (1M context, fast).
     No chunking needed — feeds the entire paper in one prompt."""
     prompt = (
@@ -353,6 +476,18 @@ def _generate_rubric_gemini(paper_text: str) -> dict[str, Any]:
         "🚫 ANTI-DOUBLE-COUNT: If you see 'Q1 [10 marks]' broken into 'Q1.1, Q1.2, …', "
         "list ONLY the sub-questions OR only the parent — never both.\n\n"
         f"{_RUBRIC_QUALITY_RULES}\n"
+    )
+    if solution_key_text:
+        prompt += (
+            "🔑 TEACHER'S SOLUTION KEY / ANSWER KEY:\n"
+            "You have been provided with the teacher's official solution key / answer key below. "
+            "You MUST use the solutions, steps, and correct answers from this key to write the "
+            "detailed marking rubric criteria. Map each solution back to its corresponding question.\n"
+            "\"\"\"\n"
+            f"{solution_key_text}\n"
+            "\"\"\"\n\n"
+        )
+    prompt += (
         "Output format — ONE line per question:\n"
         "    Q<num> (<X> marks): <detailed mark-point-by-mark-point criteria>\n\n"
         "Cover ALL questions across ALL sections (A, B, C, D, E). Do not skip any.\n\n"
@@ -360,38 +495,51 @@ def _generate_rubric_gemini(paper_text: str) -> dict[str, Any]:
         '{ "rubric": "multi-line string", "questions_found": int, "total_marks": int }\n\n'
         f"Question paper text:\n\"\"\"\n{paper_text[:200000]}\n\"\"\""
     )
-    rsp = _gemini().models.generate_content(
-        model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
-        contents=[prompt],
-        config=gtypes.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.2,
-            max_output_tokens=32768,
-        ),
-    )
-    raw = rsp.text or ""
-    try:
-        out = _extract_json(raw)
-    except Exception:
-        # Truncated JSON — salvage what we can by extracting the rubric field
-        # via regex even if JSON parsing fails
-        rubric_m = re.search(r'"rubric"\s*:\s*"((?:[^"\\]|\\.)*)', raw, re.DOTALL)
-        total_m = re.search(r'"total_marks"\s*:\s*(\d+)', raw)
-        qf_m = re.search(r'"questions_found"\s*:\s*(\d+)', raw)
-        if rubric_m:
-            rubric_raw = rubric_m.group(1)
-            # Unescape \n, \t — avoid full unicode_escape which breaks on non-ASCII
-            rubric_text = rubric_raw.replace("\\n", "\n").replace("\\t", "\t").replace('\\"', '"').replace("\\\\", "\\")
-            out = {
-                "rubric": rubric_text,
-                "questions_found": int(qf_m.group(1)) if qf_m else 0,
-                "total_marks": int(total_m.group(1)) if total_m else 0,
-            }
-        else:
-            raise
+    last_err = None
+    for model in _gemini_model_chain():
+        try:
+            rsp = _gemini().models.generate_content(
+                model=model,
+                contents=[prompt],
+                config=gtypes.GenerateContentConfig(
+                    responseMimeType="application/json",
+                    temperature=0.2,
+                    maxOutputTokens=32768,
+                    thinkingConfig=gtypes.ThinkingConfig(thinkingBudget=0),
+                ),
+            )
+            raw = rsp.text or ""
+            try:
+                out = _extract_json(raw)
+            except Exception:
+                # Truncated JSON — salvage what we can by extracting the rubric field
+                # via regex even if JSON parsing fails
+                rubric_m = re.search(r'"rubric"\s*:\s*"((?:[^"\\]|\\.)*)', raw, re.DOTALL)
+                total_m = re.search(r'"total_marks"\s*:\s*(\d+)', raw)
+                qf_m = re.search(r'"questions_found"\s*:\s*(\d+)', raw)
+                if rubric_m:
+                    rubric_raw = rubric_m.group(1)
+                    # Unescape \n, \t — avoid full unicode_escape which breaks on non-ASCII
+                    rubric_text = rubric_raw.replace("\\n", "\n").replace("\\t", "\t").replace('\\"', '"').replace("\\\\", "\\")
+                    out = {
+                        "rubric": rubric_text,
+                        "questions_found": _safe_int(qf_m.group(1)) if qf_m else 0,
+                        "total_marks": _safe_int(total_m.group(1)) if total_m else 0,
+                    }
+                else:
+                    raise
+            return out
+        except Exception as e:
+            last_err = e
+            msg = str(e).lower()
+            if _is_quota(msg):
+                print(f"[rubric-gemini {model}] quota exhausted, trying next Gemini model...")
+                continue
+            raise e
+    raise last_err
     out["rubric"] = str(out.get("rubric", "")).strip()
-    out["questions_found"] = int(out.get("questions_found") or 0)
-    out["total_marks"] = int(out.get("total_marks") or 0)
+    out["questions_found"] = _safe_int(out.get("questions_found") or 0)
+    out["total_marks"] = _safe_int(out.get("total_marks") or 0)
     # Fallback: if model said 0 questions but rubric has Q-lines, count them
     if out["questions_found"] == 0 and out["rubric"]:
         counted = len(re.findall(r"^\s*Q\d+[\.\(]", out["rubric"], re.MULTILINE))
@@ -404,13 +552,13 @@ def _correct_total_marks(out: dict[str, Any], paper_text: str) -> dict[str, Any]
     """If the paper declares a Maximum/Total Marks value and the model returned a
     different total, trust the declared value. Supports any value 10-500."""
     declared_match = re.search(
-        r"(?:Maximum|Total)\s*Marks?\s*[:\-]?\s*(\d{2,4})\b",
+        r"(?:maximum|total|max\.?|पूर्णांक|कुल\s*अंक|अधिकतम\s*अंक)\s*(?:marks?|अंक)?\s*[:\-]?\s*(\d{2,4})\b",
         paper_text, re.IGNORECASE,
     )
     if declared_match:
         declared_total = int(declared_match.group(1))
         if 10 <= declared_total <= 500 and out.get("total_marks") != declared_total:
-            model_said = int(out.get("total_marks") or 0)
+            model_said = _safe_int(out.get("total_marks") or 0)
             print(f"[rubric] Total mismatch: model said {model_said}, paper declared "
                   f"{declared_total}. Trusting the paper's declared value.")
             out["total_marks"] = declared_total
@@ -419,7 +567,96 @@ def _correct_total_marks(out: dict[str, Any], paper_text: str) -> dict[str, Any]
     return out
 
 
-def _generate_rubric_chunked(full_text: str, chunks: list[str], model: str) -> dict[str, Any]:
+def _recalculate_rubric_stats(out: dict[str, Any]) -> dict[str, Any]:
+    """Recalculate questions_found and total_marks programmatically by parsing the final compiled rubric."""
+    rubric = out.get("rubric") or ""
+    if not rubric:
+        return out
+
+    if isinstance(rubric, dict):
+        # Convert dictionary format to standard multi-line string
+        dict_lines = []
+        for q_num, criteria in rubric.items():
+            if isinstance(criteria, dict):
+                marks = criteria.get("marks") or criteria.get("max_marks") or ""
+                desc = criteria.get("desc") or criteria.get("criteria") or criteria.get("answer") or str(criteria)
+                marks_str = f" ({marks} marks)" if marks else ""
+                dict_lines.append(f"{q_num}{marks_str}: {desc}")
+            else:
+                dict_lines.append(f"{q_num}: {criteria}")
+        rubric = "\n".join(dict_lines)
+        out["rubric"] = rubric
+
+    lines = rubric.splitlines()
+    main_questions = set()
+    calculated_total_marks = 0.0
+
+    for line in lines:
+        line = line.strip()
+        if not line.startswith("Q"):
+            continue
+
+        colon_idx = line.find(":")
+        if colon_idx != -1:
+            header = line[:colon_idx].strip()
+            
+            # Extract parent question number, e.g. "Q1" from "Q1(i)"
+            m_main = re.match(r'^(Q\d+)', header)
+            if m_main:
+                main_questions.add(m_main.group(1))
+            else:
+                main_questions.add(header)
+            
+            # Find all contents inside parentheses (...) or brackets [...] in the header
+            matches = re.findall(r'[\(\[]([^\]\)]+)[\)\]]', header)
+            for content in matches:
+                content = content.lower().strip()
+                
+                # Check for indicators of mark specifications: "mark", "marks", "अंक", "अंकों"
+                if any(k in content for k in ["mark", "अंक"]):
+                    # Parse math expressions like "1+1=2" or "=2"
+                    if "=" in content:
+                        m_eq = re.search(r'=\s*([\d\.]+)', content)
+                        if m_eq:
+                            try:
+                                calculated_total_marks += float(m_eq.group(1))
+                                break
+                            except ValueError:
+                                pass
+                    
+                    # Match digit followed by mark word: "1 mark", "2 अंक", etc.
+                    m_num = re.search(r'([\d\.]+)\s*(?:mark|अंक)', content)
+                    if m_num:
+                        try:
+                            calculated_total_marks += float(m_num.group(1))
+                            break
+                        except ValueError:
+                            pass
+                    
+                    # Match subparts sum: "1+1 marks" or similar
+                    numbers = re.findall(r'[\d\.]+', content)
+                    if numbers and "+" in content:
+                        try:
+                            calculated_total_marks += sum(float(n) for n in numbers)
+                            break
+                        except ValueError:
+                            pass
+                else:
+                    # Fallback: check if the content is purely a number (e.g. [2] or (2)), ignoring Roman/alpha labels
+                    if re.match(r'^[\d\.]+$', content):
+                        try:
+                            calculated_total_marks += float(content)
+                            break
+                        except ValueError:
+                            pass
+
+    out["questions_found"] = len(main_questions)
+    if calculated_total_marks > 0:
+        out["total_marks"] = int(calculated_total_marks)
+    return out
+
+
+def _generate_rubric_chunked(full_text: str, chunks: list[str], model: str, solution_key_chunks: list[str] = None) -> dict[str, Any]:
     """Generate a rubric for a long paper by processing one chunk at a time
     (with a small wait between chunks to respect Groq's TPM rate window)."""
     all_lines: list[str] = []
@@ -429,6 +666,16 @@ def _generate_rubric_chunked(full_text: str, chunks: list[str], model: str) -> d
             f"You are reading PART {i+1}/{len(chunks)} of a multi-page CBSE question paper.\n\n"
             "Write a DETAILED marking rubric for every question in this part.\n\n"
             f"{_RUBRIC_QUALITY_RULES}\n"
+        )
+        if solution_key_chunks and i < len(solution_key_chunks) and solution_key_chunks[i].strip():
+            chunk_prompt += (
+                "🔑 TEACHER'S SOLUTION KEY / ANSWER KEY (Part):\n"
+                "Use the solutions and correct answers from this key to ground the detailed rubric criteria:\n"
+                "\"\"\"\n"
+                f"{solution_key_chunks[i]}\n"
+                "\"\"\"\n\n"
+            )
+        chunk_prompt += (
             "Rules:\n"
             "  - Use the mark allocation visible in the text ([5 marks], (3), 5M).\n"
             "  - Sub-questions only — never list both parent and sub-questions.\n"
@@ -439,25 +686,34 @@ def _generate_rubric_chunked(full_text: str, chunks: list[str], model: str) -> d
             '{ "rubric_lines": [string], "questions_found": int, "chunk_marks": int }\n\n'
             f"Paper part {i+1}/{len(chunks)}:\n\"\"\"\n{chunk}\n\"\"\""
         )
-        content = _groq_chat_with_retry(
-            model,
-            messages=[
-                {"role": "system", "content": "You return only valid JSON."},
-                {"role": "user",   "content": chunk_prompt},
-            ],
-            temperature=0.2,
-            max_tokens=4000,
-            response_format={"type": "json_object"},
-        )
-        part = _extract_json(content)
-        lines = [str(l).strip() for l in (part.get("rubric_lines") or []) if str(l).strip()]
+        content = ""
+        try:
+            content = _groq_chat_with_retry(
+                model,
+                messages=[
+                    {"role": "system", "content": "You return only valid JSON."},
+                    {"role": "user",   "content": chunk_prompt},
+                ],
+                temperature=0.2,
+                max_tokens=1500,
+                response_format={"type": "json_object"},
+            )
+            part = _extract_json(content)
+            lines = [str(l).strip() for l in (part.get("rubric_lines") or []) if str(l).strip()]
+            if not lines and part.get("rubric"):
+                lines = [l.strip() for l in str(part.get("rubric")).splitlines() if l.strip()]
+        except Exception as je:
+            print(f"[rubric chunk {i+1}/{len(chunks)}] JSON parsing failed: {je}. Attempting regex salvage...")
+            lines = []
+            if content:
+                lines = [l.strip() for l in re.findall(r'(Q\d+[\w\.]*\s*\(.*?\)\s*:[^"\n]+)', content)]
+            part = {"chunk_marks": 0}
+            
         all_lines.extend(lines)
-        total_q += int(part.get("questions_found") or len(lines))
-        total_marks += int(part.get("chunk_marks") or 0)
+        total_q += _safe_int(part.get("questions_found") or len(lines))
+        total_marks += _safe_int(part.get("chunk_marks") or 0)
         print(f"[rubric chunk {i+1}/{len(chunks)}] {len(lines)} Q lines, {part.get('chunk_marks')} marks")
         # Pace chunks so TPM window has time to clear between calls
-        # (Groq llama-3.3-70b free tier: 6000 TPM, each chunk uses ~3500 tokens,
-        # so 18-20s wait keeps us safely under the limit)
         if i + 1 < len(chunks):
             _time.sleep(20)
     out = {
@@ -465,6 +721,7 @@ def _generate_rubric_chunked(full_text: str, chunks: list[str], model: str) -> d
         "questions_found": total_q,
         "total_marks": total_marks,
     }
+    out = _recalculate_rubric_stats(out)
     return _correct_total_marks(out, full_text)
 
 
@@ -498,8 +755,8 @@ def detect_scope(student_answer: str, rubric: str = "") -> dict[str, Any]:
         "Return STRICT JSON only:\n"
         "{ \"grade\": int (1-12), \"subject\": string, \"chapter\": string, "
         "\"confidence\": int (0-100), \"reason\": string (one sentence) }\n\n"
-        f"RUBRIC (strongest signal):\n\"\"\"\n{rubric[:1500] or '(no rubric provided)'}\n\"\"\"\n\n"
-        f"Student answer:\n\"\"\"\n{student_answer[:2500]}\n\"\"\""
+        f"RUBRIC (strongest signal):\n\"\"\"\n{rubric or '(no rubric provided)'}\n\"\"\"\n\n"
+        f"Student answer:\n\"\"\"\n{student_answer}\n\"\"\""
     )
     content = _groq_chat_with_retry(
         model,
@@ -513,7 +770,7 @@ def detect_scope(student_answer: str, rubric: str = "") -> dict[str, Any]:
     )
     out = _extract_json(content)
     try:
-        out["grade"] = max(1, min(12, int(out.get("grade", 6))))
+        out["grade"] = max(1, min(12, _safe_int(out.get("grade", 6))))
     except Exception:
         out["grade"] = 6
     out["subject"] = str(out.get("subject", "") or "").strip() or "General"
@@ -523,21 +780,168 @@ def detect_scope(student_answer: str, rubric: str = "") -> dict[str, Any]:
 
 def grade_text(system_prompt: str, student_answer: str) -> dict[str, Any]:
     model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-    # Estimate tokens needed: ~80 tokens per question in per_question array.
-    # Count questions in rubric (lines starting with Q) and set a floor of 2000.
+    
+    # Check if we should chunk
     q_count = len(re.findall(r"^\s*Q\d", system_prompt, re.MULTILINE))
-    max_tokens = max(2000, q_count * 100 + 1000)
-    content = _groq_chat_with_retry(
-        model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": f"Student answer:\n\n{student_answer}"},
-        ],
-        temperature=0.2,
-        max_tokens=max_tokens,
-        response_format={"type": "json_object"},
-    )
-    return _extract_json(content)
+    
+    # If the number of questions is small (<= 8), we can run a single call
+    if q_count <= 8:
+        max_tokens = max(1500, q_count * 200 + 800)
+        content = _groq_chat_with_retry(
+            model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": f"Student answer:\n\n{student_answer}"},
+            ],
+            temperature=0.2,
+            max_tokens=max_tokens,
+            response_format={"type": "json_object"},
+        )
+        return _extract_json(content)
+        
+    # Otherwise, chunk the grading question-by-question to avoid TPM rate limits (413)
+    print(f"[grader] Splitting {q_count} questions into chunks of 8 to fit Groq TPM limit.")
+    
+    # Extract the rubric from the system prompt
+    rubric_match = re.search(r'Marking rubric the teacher provided:\s*"""(.*?)"""', system_prompt, re.DOTALL)
+    if not rubric_match:
+        # Fallback if regex doesn't match: just run single call
+        max_tokens = max(4000, q_count * 180 + 1500)
+        content = _groq_chat_with_retry(
+            model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": f"Student answer:\n\n{student_answer}"},
+            ],
+            temperature=0.2,
+            max_tokens=max_tokens,
+            response_format={"type": "json_object"},
+        )
+        return _extract_json(content)
+        
+    rubric = rubric_match.group(1).strip()
+    
+    # Split the rubric into chunks of 8 questions
+    rubric_lines = rubric.splitlines()
+    chunks = []
+    current_chunk = []
+    chunk_q_count = 0
+    for line in rubric_lines:
+        current_chunk.append(line)
+        line_clean = re.sub(r"^[-*#\s]+", "", line)
+        if re.match(r"^(?:q\d+|question\s*\d+|q\s*\d+)", line_clean, re.IGNORECASE):
+            chunk_q_count += 1
+            if chunk_q_count >= 8:
+                chunks.append("\n".join(current_chunk))
+                current_chunk = []
+                chunk_q_count = 0
+    if current_chunk:
+        chunks.append("\n".join(current_chunk))
+        
+    results = []
+    for idx, r_chunk in enumerate(chunks):
+        print(f"[grader] Processing chunk {idx+1}/{len(chunks)}...")
+        # Reconstruct the system prompt for this chunk
+        chunk_system_prompt = system_prompt.replace(rubric, r_chunk)
+        
+        # Enforce chunk-specific marks total rule
+        chunk_marks = len(re.findall(r"^\s*Q\d", r_chunk, re.MULTILINE))
+        max_tokens = max(1500, chunk_marks * 200 + 800)
+        
+        try:
+            content = _groq_chat_with_retry(
+                model,
+                messages=[
+                    {"role": "system", "content": chunk_system_prompt},
+                    {"role": "user",   "content": f"Student answer:\n\n{student_answer}"},
+                ],
+                temperature=0.2,
+                max_tokens=max_tokens,
+                response_format={"type": "json_object"},
+            )
+            res = _extract_json(content)
+            results.append(res)
+        except Exception as e:
+            print(f"[grader] Chunk {idx+1} failed: {e}")
+            # Add a dummy fallback result for this chunk so we don't crash
+            dummy_questions = []
+            for line in r_chunk.splitlines():
+                line_clean = re.sub(r"^[-*#\s]+", "", line)
+                m = re.match(r"^((?:q\d+|question\s*\d+|q\s*\d+)[\w\.]*)\b", line_clean, re.IGNORECASE)
+                if m:
+                    dummy_questions.append({
+                        "q": m.group(1),
+                        "marks_awarded": 0,
+                        "marks_total": 1,
+                        "feedback": f"Grading failed for this question chunk: {e}",
+                        "format": "text"
+                    })
+            results.append({
+                "per_question": dummy_questions,
+                "mistakes": [{"type": "other", "description": f"Grading chunk {idx+1} failed: {e}"}]
+            })
+            
+        # Pace calls to respect RPM/TPM limits
+        if idx + 1 < len(chunks):
+            _time.sleep(10)
+            
+    # Merge results
+    merged = {
+        "student_name": "Student",
+        "detected_language": "English",
+        "marks_awarded": 0,
+        "marks_total": 0,
+        "percentage": 0.0,
+        "answer_formats_used": [],
+        "per_question": [],
+        "mistakes": [],
+        "strengths": [],
+        "suggestion": "",
+        "ai_cheat_suspicion": 0
+    }
+    
+    all_formats = set()
+    all_strengths = set()
+    suggestions = []
+    cheat_suspicions = []
+    
+    for res in results:
+        if not res:
+            continue
+        if "student_name" in res and res["student_name"] and res["student_name"] != "Student":
+            merged["student_name"] = res["student_name"]
+        if "detected_language" in res and res["detected_language"]:
+            merged["detected_language"] = res["detected_language"]
+            
+        merged["per_question"].extend(res.get("per_question") or [])
+        merged["mistakes"].extend(res.get("mistakes") or [])
+        
+        all_formats.update(res.get("answer_formats_used") or [])
+        all_strengths.update(res.get("strengths") or [])
+        
+        if res.get("suggestion"):
+            suggestions.append(res["suggestion"])
+        if res.get("ai_cheat_suspicion") is not None:
+            cheat_suspicions.append(res["ai_cheat_suspicion"])
+            
+    merged["answer_formats_used"] = list(all_formats)
+    merged["strengths"] = list(all_strengths)
+    if suggestions:
+        merged["suggestion"] = " ".join(suggestions)
+    if cheat_suspicions:
+        merged["ai_cheat_suspicion"] = int(sum(cheat_suspicions) / len(cheat_suspicions))
+        
+    # Recalculate totals
+    pq = merged["per_question"]
+    if pq:
+        computed_total = sum(float(q.get("marks_total", 0) or 0) for q in pq)
+        computed_awarded = sum(float(q.get("marks_awarded", 0) or 0) for q in pq)
+        merged["marks_total"] = int(computed_total) if computed_total.is_integer() else computed_total
+        merged["marks_awarded"] = int(computed_awarded) if computed_awarded.is_integer() else computed_awarded
+        if merged["marks_total"] > 0:
+            merged["percentage"] = round(merged["marks_awarded"] / merged["marks_total"] * 100, 1)
+            
+    return merged
 
 
 def cluster_misconceptions(mistakes_by_student: list[dict]) -> list[dict[str, Any]]:
@@ -625,7 +1029,7 @@ def ncert_validate(student_answer: str, grade: int, subject: str, chapter: str,
         model,
         messages=[
             {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": f"Student answer sheet (Grade {grade} {subject}):\n\n{student_answer[:4000]}"},
+            {"role": "user",   "content": f"Student answer sheet (Grade {grade} {subject}):\n\n{student_answer}"},
         ],
         temperature=0.1,
         max_tokens=1200,
@@ -645,11 +1049,15 @@ def verify_grade(student_answer: str, rubric: str, grade_result: dict[str, Any])
     model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
     critic = (
         "You are a skeptical senior CBSE examiner reviewing another examiner's "
-        "grading. Your job is to catch over-generous or unfair marks. Return STRICT JSON:\n"
+        "grading. Your job is to catch over-generous or unfair marks. "
+        "Your evaluation MUST be based strictly and solely on the provided Rubric/Marking Scheme. "
+        "Do not invent external standards or grade according to your own custom criteria. "
+        "Verify that step-by-step answers were evaluated and step-by-step marks were awarded correctly as defined in the rubric. "
+        "Return STRICT JSON:\n"
         "{ \"agrees\": boolean, \"confidence\": number (0-100), "
         "\"suggested_marks\": number, \"comment\": string }\n\n"
         f"Rubric:\n\"\"\"\n{rubric}\n\"\"\"\n\n"
-        f"Student answer:\n\"\"\"\n{student_answer[:4000]}\n\"\"\"\n\n"
+        f"Student answer:\n\"\"\"\n{student_answer}\n\"\"\"\n\n"
         f"First grader's verdict:\n"
         f"- marks: {grade_result.get('marks_awarded')}/{grade_result.get('marks_total')}\n"
         f"- suggestion: {grade_result.get('suggestion','')}\n"
@@ -673,6 +1081,8 @@ _GEMINI_FALLBACK_CHAIN = [
     "gemini-flash-latest",
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
 ]
 
 
@@ -702,9 +1112,10 @@ def groq_vision_ocr(image_bytes_list: list[bytes], prompt: str,
     Used as fallback when Gemini quota is exhausted."""
     import base64
 
-    model = os.getenv("GROQ_VISION_MODEL", "llama-3.2-11b-vision-preview")
+    model = os.getenv("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+    max_imgs = 3 if "qwen" in model.lower() else 5
     content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
-    for img in image_bytes_list[:5]:  # Groq vision caps at ~5 images per request
+    for img in image_bytes_list[:max_imgs]:  # Groq vision limits depend on model (Qwen supports up to 3)
         b64 = base64.b64encode(img).decode("ascii")
         content.append({
             "type": "image_url",
@@ -767,12 +1178,11 @@ def gemini_ocr(image_bytes: bytes, mime: str = "image/jpeg",
             except Exception as e:
                 msg = str(e); last_err = e
                 if _is_quota(msg):
-                    raise RuntimeError(
-                        "Gemini daily quota exhausted. Wait until reset or use a new key."
-                    )
+                    print(f"[gemini-ocr {model}] quota exhausted, falling through to next model...")
+                    break
                 if not _is_overloaded(msg):
                     raise
-                print(f"[gemini-ocr {model}] overloaded (attempt {attempt + 1}/3), backing off…")
+                print(f"[gemini-ocr {model}] overloaded (attempt {attempt + 1}/3), backing off...")
         print(f"[gemini-ocr] falling through from {model} -> next model")
 
     raise RuntimeError(f"All Gemini models overloaded for OCR. Last error: {last_err}")

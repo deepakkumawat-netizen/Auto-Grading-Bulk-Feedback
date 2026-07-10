@@ -77,49 +77,49 @@ CBSE_LANGUAGES: dict[str, dict] = {
 # All unique scripts used across CBSE-approved languages
 ALL_SCRIPTS: list[str] = sorted({v["script"] for v in CBSE_LANGUAGES.values()})
 
-# OCR instruction block for Gemini — tells it every script it may encounter
+# OCR instruction block for Gemini - tells it every script it may encounter
 def ocr_language_block() -> str:
     script_examples = "\n".join(
-        f"  • {lang} ({info['script']} script, {', '.join(info['states'][:2])}): "
+        f"  - {lang} ({info['script']} script, {', '.join(info['states'][:2])}): "
         f"e.g. \"{info['sample']}\""
         for lang, info in CBSE_LANGUAGES.items()
         if lang not in ("English",)  # English is obvious; skip
     )
     return (
-        "🌐 MULTI-SCRIPT TRANSCRIPTION — CBSE students write in their state language:\n"
+        "MULTI-SCRIPT TRANSCRIPTION - CBSE students write in their state language:\n"
         f"{script_examples}\n"
         "Rules:\n"
-        "  - Transcribe every script exactly as written — DO NOT translate.\n"
+        "  - Transcribe every script exactly as written - DO NOT translate.\n"
         "  - For Devanagari, Bengali, Telugu, Tamil, Gujarati, Kannada, Odia, "
         "Gurmukhi, Malayalam, Nastaliq, Meitei Mayek, Ol Chiki: copy the characters faithfully.\n"
         "  - Mixed-language answers (e.g. Telugu + English technical terms, "
-        "Hindi + English equations) are very common — keep both scripts.\n"
-        "  - If a script is unclear or a word is illegible, write it as [?] — never substitute "
+        "Hindi + English equations) are very common - keep both scripts.\n"
+        "  - If a script is unclear or a word is illegible, write it as [?] - never substitute "
         "a different language."
     )
 
 
-# Grading instruction block — tells the AI to grade concepts in all CBSE languages
+# Grading instruction block - tells the AI to grade concepts in all CBSE languages
 def grading_language_block() -> str:
     lang_list = ", ".join(CBSE_LANGUAGES.keys())
-    return f"""🌐 MULTI-LANGUAGE GRADING — CBSE National Policy
+    return f"""MULTI-LANGUAGE GRADING - CBSE National Policy
 CBSE officially permits answer writing in the school's medium of instruction.
 Approved languages: {lang_list}.
 
-Rules — apply to every question:
-  ✅ A correct concept explained in Telugu, Bengali, Tamil, Marathi, Gujarati, Kannada,
-     Odia, Punjabi, Urdu, Malayalam, Assamese, Hindi, Nepali, or any other CBSE language
-     earns EXACTLY the same marks as the same concept in English.
-  ✅ Mixed-language answers (e.g. Kannada sentences + English technical terms like
-     "photosynthesis" or chemical formulas) are standard practice — award full marks
-     if the concept is correct.
-  ✅ Regional terms for NCERT concepts are valid:
-     Tamil "ஒளிச்சேர்க்கை" = Hindi "प्रकाश संश्लेषण" = English "photosynthesis" — all correct.
-  ❌ Do NOT deduct marks for writing in a regional language instead of English.
-  ❌ Do NOT penalise transliteration (e.g. "prakaash sanshleshan" written in English script
-     for the Hindi term).
-  ⚠  Only flag "language" mistake type when the language choice creates genuine AMBIGUITY
-     about whether the concept is correct — not simply because it's non-English.
+Rules - apply to every question:
+  [OK] A correct concept explained in Telugu, Bengali, Tamil, Marathi, Gujarati, Kannada,
+      Odia, Punjabi, Urdu, Malayalam, Assamese, Hindi, Nepali, or any other CBSE language
+      earns EXACTLY the same marks as the same concept in English.
+  [OK] Mixed-language answers (e.g. Kannada sentences + English technical terms like
+      "photosynthesis" or chemical formulas) are standard practice - award full marks
+      if the concept is correct.
+  [OK] Regional terms for subject concepts are valid:
+      Tamil "ஒளிச்சேர்க்கை" = Hindi "प्रकाश संश्लेषण" = English "photosynthesis" - all correct.
+  [ERROR] Do NOT deduct marks for writing in a regional language instead of English.
+  [ERROR] Do NOT penalise transliteration (e.g. "prakaash sanshleshan" written in English script
+      for the Hindi term).
+  [WARNING] Only flag "language" mistake type when the language choice creates genuine AMBIGUITY
+      about whether the concept is correct - not simply because it's non-English.
 
 DETECTED LANGUAGE: Identify the primary language/script the student used and set
   \"detected_language\" in your JSON response (e.g. "Telugu", "Hindi", "Bengali", "Tamil",

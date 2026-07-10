@@ -1,0 +1,84 @@
+Auto Grading Tool – Required Pipeline
+
+1.  Remove Automatic Subject & Grade Detection
+
+-   Do not detect the subject or grade from uploaded files.
+-   Teachers must manually select the subject and grade.
+
+2.  Read the Question Paper First
+
+-   Extract all question numbers.
+-   Extract marks for each question.
+-   Build the grading structure from the question paper.
+
+3.  Process the Teacher’s Answer Key
+
+-   Read the uploaded answer key.
+-   Use only the teacher’s answer key as the grading reference.
+-   Do not generate or assume ideal answers.
+
+4.  Extract the Grading Rubrics
+
+-   Extract step-wise marking if provided.
+-   Create rubrics directly from the teacher’s marking scheme.
+-   Display extracted rubrics in the Rubrics section.
+
+5.  Do Not Use AI to Decide the Marking Scheme
+
+-   Never create your own answer format.
+-   Never invent rubric points.
+-   Follow only the teacher-provided answer key and marking
+    instructions.
+
+6.  Grade Student Answer Sheets
+
+-   Match each student answer with the correct question.
+-   Evaluate only against the teacher’s answer key and rubrics.
+-   Follow the teacher’s marking pattern exactly.
+
+7.  Step-wise Marking
+
+-   Evaluate each step separately if step-wise marks are provided.
+-   Award marks only for correct steps.
+-   Do not award marks for missing or incorrect steps.
+
+8.  Handle Unanswered Questions
+
+-   Award 0 marks.
+-   Feedback: “Question not attempted.”
+
+9.  Strict Evaluation
+
+-   Do not infer missing information.
+-   Do not assume alternative answers unless explicitly provided.
+-   Grade strictly according to the uploaded marking scheme.
+
+10. Generate Results
+
+-   Show question-wise marks.
+-   Show step-wise marks (if applicable).
+-   Provide rubric-based feedback.
+-   Calculate the final score automatically.
+
+11. Recommended Pipeline Teacher selects Subject & Grade (Manual) ↓
+    Upload Question Paper ↓ Extract Questions & Marks ↓ Upload Teacher
+    Answer Key ↓ Extract Rubrics & Step-wise Marking ↓ Upload Student
+    Answer Sheets ↓ Match Questions ↓ Evaluate Using Teacher Rubrics
+    Only ↓ Assign Step-wise Marks ↓ Generate Feedback ↓ Calculate Final
+    Grade & Export Results
+
+12. Grade-Level Appropriate Feedback
+
+-   Generate feedback according to the student’s grade level.
+-   Use simple language for lower grades.
+-   Use detailed academic language for higher grades.
+-   Base feedback only on the teacher’s rubric and student response.
+-   Do not generate generic AI feedback.
+-   Mention missing or incorrect steps using grade-appropriate language.
+
+13. MCP Integration (Optional)
+
+-   Use MCP tools for document parsing.
+-   Use OCR MCP for handwritten answer extraction.
+-   Use structured extraction MCP for questions, marks, and rubrics.
+-   Keep grading deterministic; MCP should only assist with extraction.

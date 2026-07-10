@@ -19,7 +19,7 @@ const DEFAULT_RULES = {
 };
 const DEFAULT_FEEDBACK = {
   language: "English", tone: "Auto (based on grade)", length: "Auto (based on grade)",
-  ncert_ref: true, show_concepts: true, revision_tips: true,
+  show_concepts: true, revision_tips: true,
 };
 
 export default function ExamConfigPanel({ value, onChange, apiBase = "/api" }) {
@@ -138,22 +138,6 @@ export default function ExamConfigPanel({ value, onChange, apiBase = "/api" }) {
                 <span>Board</span>
                 <select value={cfg.board || "CBSE"} onChange={e => update({ board: e.target.value })}>
                   {BOARDS.map(b => <option key={b}>{b}</option>)}
-                </select>
-              </label>
-              <label className="ecp-field">
-                <span>Grade</span>
-                <select value={cfg.grade || ""} onChange={e => update({ grade: parseInt(e.target.value) || "" })}>
-                  <option value="">Select grade</option>
-                  {Array.from({length:12},(_,i)=>i+1).map(g=><option key={g} value={g}>Grade {g}</option>)}
-                </select>
-              </label>
-            </div>
-            <div className="ecp-grid-2">
-              <label className="ecp-field">
-                <span>Subject</span>
-                <select value={cfg.subject || ""} onChange={e => update({ subject: e.target.value })}>
-                  <option value="">Select subject</option>
-                  {SUBJECTS.map(s => <option key={s}>{s}</option>)}
                 </select>
               </label>
               <label className="ecp-field">
@@ -305,14 +289,6 @@ export default function ExamConfigPanel({ value, onChange, apiBase = "/api" }) {
                 <span>Length</span>
                 <select value={feedback.length || "Auto (based on grade)"} onChange={e => updateFb({length: e.target.value})}>
                   {["Auto (based on grade)","Short — 1-2 sentences","Medium — 3-4 sentences","Detailed — full paragraph"].map(l=><option key={l}>{l}</option>)}
-                </select>
-              </label>
-              <label className="ecp-field">
-                <span>NCERT chapter reference</span>
-                <select value={feedback.ncert_ref ? "yes" : "no"} onChange={e => updateFb({ncert_ref: e.target.value === "yes"})}>
-                  <option value="yes">Auto (Grade 6+ only)</option>
-                  <option value="always">Always include</option>
-                  <option value="no">Never include</option>
                 </select>
               </label>
             </div>

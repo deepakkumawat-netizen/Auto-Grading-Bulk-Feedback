@@ -1,0 +1,534 @@
+--- PAGE 1 ---
+Page 1 of 12 
+ 
+MATHEMATICS STANDARD – Code No.041 MARKING SCHEME CLASS – X (2025-26)  Maximum Marks: 80                                                                                                 Time: 3 hours  Q.No.                                                        Section A  Marks 1. (C) 3 
+ 
+LCM(𝑎,𝑏,𝑐)= 2ଶ×3௫×5×7=3780 140 ×  3௫= 3780  3௫ = 27=3ଷ      𝑥=3  1 2. (A) 2 
+ 
+As shortest distance from (2, 3) to y-axis is the 𝑥 coordinate, i.e., 2. 1 3. (B) k≠ଵହ
+ସ 
+ 
+ଷ
+ଶ≠ଶ௞
+ହ, hence k≠ଵହ
+ସ 
+ 
+1 4. (C) 6cm 
+ 
+AB+CD=AD+BC AB+4=3+7 AB=6cm 
+ 
+1 5. (D) ଵ
+௫ 
+ଵ
+௦௘௖௾ା௧௔௡௾ =(௦௘௖௾ି௧௔௡௾)
+(௦௘௖௾ା௧௔௡௾)(௦௘௖௾ି௧௔௡௾)  = (௦௘௖௾ି௧௔௡௾)
+ଵ = secϴ-tanϴ 
+ 
+1 6. (D) (𝑥 +2) ( 𝑥 +1) = 𝑥 2 +2 𝑥 +3, so, 𝑥 2 +3 𝑥 +2= 𝑥 2 +2 𝑥 +3 gives 𝑥 -1=0 
+ 
+It’s not a quadratic equation. 1 7.   D) 8[గ
+଺ - √ଷ
+ସ ] cm2    
+ 
+ Required Area=8 × area of one segment (with r = 1cm and 𝜃 = 60˚) =8x ( ଺଴°
+ଷ଺଴° x 𝜋 x 12 − √ଷ
+ସ x 12)  = 8[గ
+଺ − √ଷ
+ସ ] cm2    
+1 
+
+
+--- PAGE 2 ---
+Page 2 of 12 
+ 
+For Visually Impaired  candidates: 
+ 
+(D) 9𝜋cm2 
+area of circle=𝜋(3ଶ) 
+                     =9 𝜋 cm2 
+ 
+8. (B) ଷଵ
+ଷ଺ 
+ 
+Probability of getting sum 8 is ହ
+ଷ଺ 
+Probability of not getting sum 8 is ଷଵ
+ଷ଺ 
+ 
+1 
+9. (B) 12° 
+sin5𝑥  = √ଷ
+ଶ  
+So, 5𝑥 = 60° 
+And hence 𝑥 =12° 
+ 
+1 
+10. (C) 4 
+ 
+Since HCF=81, the numbers can be 81𝑥 and 81𝑦 
+81𝑥 +81𝑦 =1215 
+𝑥 + 𝑦 =15 
+which gives four pairs as 
+(1,14), (2,13), (4,11), (7,8)  
+ 
+1 
+11. (D) 5cm 
+ 
+𝜋r2= 51 
+V=ଵ
+ଷ×  𝜋r2 × h 
+85 =ଵ
+ଷ×  51 × h 
+h= ଼ହ
+ଵ଻=5𝑐𝑚 
+ 
+1 
+12. (D)  
+ 
+As for equal roots to the corresponding equation,  
+b2 =4ac 
+Hence ac = ௕మ
+ସ 
+And hence ac > 0⇒ c and a must have same signs    
+ 
+1 
+13. (C) 231 
+ 
+Area of sector  
+=ଵ
+ଶ × 𝑙 × r  
+=ଵ
+ଶ × 22× 21 = 231cm2 
+ 
+1 
+
+--- PAGE 3 ---
+Page 3 of 12 
+ 
+14. (C) 18cm        
+ 
+ ∆𝐴𝐵𝐶 ~ ∆𝐷𝐸𝐹   
+஺஻
+஽ா = ஻஼
+ாி=஺஼
+஽ி=௉௘௥௜௠௘௧௘௥ ௢௙ ∆஺஻஼
+௉௘௥௜௠௘௧௘௥ ௢௙ ∆஽ாி  
+଺
+ଽ = ௉௘௥௜௠௘௧௘௥ ௢௙ ∆஺஻஼
+ଶ଻   
+Perimeter of ∆ ABC= 18cm 
+ 
+1 15. (B) ଽ
+ସ 
+ 
+Probability of getting vowels in the word Mathematics is ସ
+ଵଵ, So,ଶ
+ଶ௫ାଵ=ସ
+ଵଵ ⇒ 𝑥 = ଽ
+ସ 
+ 
+1 16. (C) Parallelogram 
+ 
+By visualising the figure by plotting points in co-ordinate plane it can be concluded it is a Parallelogram. 
+ 
+1 17. (A) median is increased by 2 
+ 
+1 18. (A) 40cm                     
+        Since, tangent is perpendicular to the radius at the point of contact In ∆OPT, right angled at T OP2=OT2+TP2 412=92+TP2 TP2= 1681-81=1600 TP=40cm 1 19. (A) Both assertion (A) and reason (R) are true and reason (R) is the correct explanation of assertion (A) 1 20.  (A)  cosA+cos2A=1 ---------(i) gives cos A= sin2A------(ii) (using sin2A+ cos2A=1) Substituting value of cos A from (ii) in (i)  sin2A +sin4A=1 ⸫ Both assertion (A) and reason (R) are true and reason (R) is the correct explanation of assertion (A) 1 
+
+
+--- PAGE 4 ---
+Page 4 of 12 
+ 
+(Section – B) 21. (A)     (B)      n =60, a =8 and d=2      𝑡଺଴= 8 + 59(2) =126      𝑡ହଵ= 108 Hence 𝑡ହଵ + 𝑡ହଶ+……..+ 𝑡଺଴= ଵ଴
+ଶ(108 +126) =1170 
+                                                           
+  OR   230 = 6 + (n -1)7 gives n=33   ⸫ Middle Term = 𝑡ଵ଻= 6 + (16)(7) = 118                         ½ ½ 1    1 1 22. A+B = 90o and A – B= 30o  A=60o and B =30o 1 1 23.  △ABC∼△DEF 
+ 
+⇒஺஻
+஽ா =஻஼
+ாி  
+஺஻
+஽ா =ଶ஻
+ଶாொ (AP and DQ are the medians) 
+ 
+஺஻
+஽ா =஻௉
+ாொ 
+ 
+In △ABP and △DEQ 
+஺஻
+஽ா =஻௉
+ாொ 
+ 
+∠B=∠E (△ABC∼△DEF) 
+ 
+⇒△ABP ~△DEQ 
+ 
+Hence, ஺஻
+஽ா   = ஺௉
+஽ொ      
+          ½  
+ 
+½      
+ 
+    ½  ½ 24.(A)              area of grass field that can be grazed by them =ఏభ
+ଷ଺଴° × 𝜋 𝑟2 +ఏమ
+ଷ଺଴° × 𝜋 𝑟2 + ఏయ
+ଷ଺଴° 𝑥 𝜋 𝑟2  = గ௥మ 
+ଷ଺଴° (𝜃ଵ + 𝜃ଶ + 𝜃ଷ) = గ ௥మ
+ଷ଺଴° × 180˚ = ଶଶ
+଻ × ଵସ ௑ ଵସ
+ଶ =308 m2    
+ 
+ 1  1 
+
+
+--- PAGE 5 ---
+Page 5 of 12 
+ 
+ 
+ 
+(B) OR 
+ 
+Area of minor segment= Area of sector − area of triangle                                          =ଽ଴°
+ଷ଺଴° 𝜋 r2 − ଵ
+ଶ  × r2                                          =(ଶହ
+ସ 𝜋 − ଶହ
+ଶ ) cm2 Area of major segment = Area of circle – Area of minor segment                                       = 𝜋 52 – (ଶହ
+ସ 𝜋 − ଶହ
+ଶ  )                                       = 25𝜋 – ଶହ
+ସ 𝜋 + ଶହ
+ଶ                                        = (଻ହ
+ସ 𝜋 + ଶହ
+ଶ ) cm2      1     1 25.  Let r be the radius of the inscribed circle  BD=BE=10cm CD=CF=8cm Let AF=AE= 𝑥  ar(△ABC) =ar(△AOC) + ar(△BOC) + ar(△AOB)                   =ଵ
+ଶ × r x AC + ଵ
+ଶ × r × BC +ଵ
+ଶ × r × AB           90    = ଵ
+ଶ× 4 (𝑥 +8+18+ 𝑥 +10)             𝑥  = 4.5cm              ∴ AB=4.5+10=14.5cm                AC=4.5+8=12.5cm         For Visually Impaired candidates:  AC2=AB2+BC2= 242+72=625 AC=25cm Area of ∆ABC=ଵ
+ଶ × 7× 24=84cm2   -----(i) Let r=radius of circle Also, Area of ∆ABC=ଵ
+ଶ (24r+25r+7r)                                 =ଵ
+ଶ × 56 r -------(ii) From (i) and (ii), we get  r=3cm 
+               ½   ½    ½   ½    ½ ½   
+ 
+½  ½ 
+
+
+--- PAGE 6 ---
+Page 6 of 12 
+ 
+(Section – C)  26. In ∆APO and ∆ACO AP=AC (Tangents from External Point) AO=AO (common) OP=OC (radii) ∆APO ≅ ∆ACO ∠POQ=180˚ (PQ is the diameter) ∠POA+∠COA+∠QOB+∠COB=180˚ 2∠COA+2∠COB=180˚         ∠ AOB = 90°  For Visually Impaired candidates:   PA=PB (Tangents from external point to a circle) ∠PAB=∠PBA= 𝑥 (angles opposite to equal sides) In ∆PAB, ∠PAB+∠PBA+∠APB=180° 𝑥 + 𝑥 +∠APB=180° ∠APB=180°−2 𝑥  ------(i) Also,  ∠PAB+∠OAB=90° (radius is perpendicular to the tangent at the point of contact) 𝑥 +∠OAB=90° 𝑥 =90°−∠OAB   --------(ii)     Substituting (ii) in (i), we get      ∠APB=180°-2(90°− ∠OAB)      ∠APB=2∠OAB 
+    1  1 1            ½   1    1 
+ 
+½ 27. HCF (36,60,84) =12 Required number of rooms= ଷ଺
+ଵଶ+଺଴
+ଵଶ+଼ସ
+ଵଶ                                           =3+5+7                                           =15   
+1 ½ 1 
+ 
+½  28. 2 𝑥 2 − (1+2√2) 𝑥 + √2    = 2 𝑥 2 − 𝑥 − 2√2 𝑥 + √2    = (2 𝑥 − 1) ( 𝑥 − √2 ) Hence the zeroes are ଵ
+ଶ and √2 .                                                                                                   Now  ି௕
+௔ = ଶ√ଶାଵ
+ଶ = √2 +ଵ
+ଶ and ௖
+௔ =√ଶ
+ଶ = ଵ
+ଶ × √2                                                                            1  1   1 
+
+
+--- PAGE 7 ---
+Page 7 of 12 
+ 
+29. 𝑠𝑖𝑛𝛳+ 𝑐𝑜𝑠𝛳 = √3  gives (𝑠𝑖𝑛𝛳+ 𝑐𝑜𝑠𝛳)ଶ=3. Hence 1+2𝑠𝑖𝑛𝛳𝑐𝑜𝑠𝛳 =3 So 2𝑠𝑖𝑛𝛳𝑐𝑜𝑠𝛳 = 2 ⇒ 𝑠𝑖𝑛𝛳 𝑐𝑜𝑠𝛳 = 1  ⸫ t𝑎𝑛 𝛳 +  𝑐𝑜𝑡𝛳 = ଵ
+௦௜௡௾௖௢௦௾ =1                                                        OR  
+௖௢௦஺ି௦௜௡஺ା
+௖௢௦஺ା௦௜௡஺ି = (௖௢௦஺ି௦௜௡஺ା)(௖௢௦஺ା௦௜௡஺ାଵ)
+(௖௢௦஺ା௦௜௡஺ିଵ)(௖௢௦஺ା௦௜௡஺ା)                     = ௖௢௦మ஺ାଶ௖௢௦஺ାଵି௦௜௡మ஺
+ଶ௦௜௡஺௖௢௦஺                     =   ଶ௖௢௦஺(ଵା௖௢௦஺)
+ଶ௦௜௡஺௖௢௦஺  = ଵା௖௢௦஺
+௦௜௡஺ = 𝑐𝑜𝑠𝑒𝑐𝐴 + 𝑐𝑜𝑡𝐴 1   1  1      1  1  
+ 
+1 30. P(Vidhi drives the car) = ଷ
+଼ as favourable outcomes are HHT,THH,HHH P(Unnati drives the car)  = ସ
+଼ as favourable outcomes are THT,THH,HTH,TTH As ସ
+଼ > ଷ
+଼ Unnati has greater probability to drive the car 1  1  1 31. Let the income of Aryan and Babban be 3𝑥 and 4𝑥 respectively And let their expenditure be 5𝑦 and 7𝑦 respectively. Since each saves ₹ 15,000, we get 3𝑥 –  5𝑦 = 15000 4𝑥 –  7𝑦 = 15000  Hence 𝑥 = 30000  Their income thus become ₹90,000 and ₹1,20,000 respectively. 
+ 
+                             OR 
+ 
+  
+1    1   1       2 for 
+correct 
+Graph 
+ 
+        
+
+
+--- PAGE 8 ---
+Page 8 of 12 
+ 
+      Hence, the solution is 𝑥=2,𝑦=2 
+ 
+Area= 2 sq. units 
+ 
+For Visually Impaired candidates 
+ 
+Let the present age of father be 𝑥 and son be 𝑦 
+So, (𝑥 + 5)  = 3(𝑦+ 5) ⇒𝑥− 3𝑦= 10 
+𝑥 −  5 =  7(𝑦−  5)  ⇒𝑥− 7𝑦=  − 30  
+So, 𝑥=  40,𝑦 = 10. 
+Hence the present ages of father and son are 40 years and 10 years 
+     Respectively 
+ 
+½ 
+ 
+½ 
+ 
+ 
+ 
+ 
+1 
+1 
+1 
+ 
+ 
+Section D 
+ 
+32. Let the original speed of train be 𝑥 km/hr 
+Distance =63km, time(t1) =଺ଷ
+௫ hrs 
+Faster speed = (𝑥 +6) km/hr 
+time (t2)=଻ଶ
+௫ା଺ hrs 
+Now t1 + t2 = 3 hrs 
+ 
+So ଺ଷ
+௫ + ଻ଶ
+௫ା଺ =3 
+ 
+63(𝑥+ 6)  + 72𝑥= 3(𝑥+ 6)𝑥 
+135𝑥 +378=3𝑥2 +18𝑥  
+3𝑥2 −117𝑥 − 378 = 0 
+𝑥2 −39𝑥 − 126 = 0 
+𝑥2 −42𝑥 +3𝑥−  126 = 0 gives (𝑥+ 3)(𝑥− 42) = 0 
+As 𝑥 can’t be negative, so 𝑥= 42 km/hr 
+ 
+The original speed of train=42 km/hr 
+ 
+ 
+1 
+ 
+1 
+ 
+ 
+1 
+ 
+ 
+ 
+ 
+1 
+ 
+1 
+ 
+ 
+33. Correct given, figure and construction 
+Correct Proof 
+since LM is parallel to QR 
+Let PM=𝑥 
+௉௅
+௉ொ =௉ெ
+௉ோ 
+ହ.଻
+ଵହ.ଶ= ௫
+௫ାହ.ହ 
+𝑥 =PM=3.3cm 
+ 
+2 
+2 
+ 
+ 
+ 
+½ 
+ 
+½ 
+ 
+
+--- PAGE 9 ---
+Page 9 of 12 
+ 
+34. (A)   Slant height of the cone 𝐿=√𝑅ଶ+𝐻ଶ = √12ଶ+6ଶ      = 3√20 𝑐𝑚  Curved Surface area of cone= 𝜋𝑅𝐿 = 𝜋 × 12 × 3√20        = (36√20) 𝜋 𝑐𝑚ଶ Area of base circle of cone (= area of outer circle – area of inner circle + top circular area of cylinder)          = 𝜋𝑅ଶ= 𝜋 ×(12)ଶ = 144𝜋 𝑐𝑚ଶ Curved Surface area of cylinder= 2𝜋𝑟ℎ = 2𝜋 × 4 × 3          = 24 𝜋 𝑐𝑚ଶ     Surface area of the remaining solid= Curved surface of cone                                                            + area of base circle of cone                                                             + curved surface area of cylinder                                                         =൫36√20൯𝜋 + 144𝜋 + 24𝜋                                                            =൫168 + 36√20൯𝜋 𝑐𝑚ଶ                                                                                      OR                                  (B) Volume of cone=ଵ
+ଷ𝜋r2h= ଵ
+ଷ𝜋 × 3×3×12= 36𝜋cm3 
+       Volume of ice-cream in the cone=ହ
+଺ × 36𝜋cm3 = 30𝜋 cm3 
+        Volume of ice-cream in the hemispherical part= ଶ
+ଷ𝜋r3=ଶ
+ଷ𝜋 ×3×3×3=18𝜋 cm3 
+           Total volume of the ice-cream = (30𝜋+18𝜋 ) =48 𝜋=150.86cm3 (approx.)  
+  ½   
+ 
+1    1   1    1   ½      2  1+½  1+½  35. (A) Mode of the frequency distribution = 55 Modal class is 45-60. Lower limit is 45 Class Interval (h) =15 Now, Mode = 𝑙 + (௙భష೑బ
+ଶ௙బି௙భି௙మ
+)   × h                      55 = 45 + ଵହି௫
+ଷ଴ି௫ି  × 5                      So, 𝑥 = 5  CI 𝒇𝒊 𝒙𝒊 𝒇𝒊𝒙𝒊 
+0-15 10 7.5 75 15-30 7 22.5 157.5 30-45 5 37.5 187.5 45-60 15 52.5 787.5 60-75 10 67.5 675 75-90 12 82.5 990  59  2872.5  Mean= 𝑥̅ =ଶ଼଻ଶ.ହ
+ହଽ =  48.68                                         ½   1 
+ 
+1     1 ½       1   
+
+
+--- PAGE 10 ---
+Page 10 of 12 
+ 
+OR 
+(B) 
+Height (in cm) Number 
+of girls 
+Class Interval frequency 
+less than 140 
+ 
+04 135-140 
+ 
+4 
+ 
+less than 145 
+ 
+11 140-145 
+ 
+7 
+less than 150 
+ 
+29 145-150 
+ 
+18 
+ 
+less than 155 
+ 
+40 
+ 
+150-155 
+ 
+11 
+ 
+less than 160 
+ 
+46 155-160 6 
+less than 165 51 160-165 5 
+ 
+ 
+Median = l +( 
+ಿ
+మି஼௙
+௙ ) 𝑥 h 
+             =145 + ( 
+ఱభ
+మିଵଵ
+ଵ଼ )×5 
+             =149.03 
+Median height = 149.03cm 
+ 
+3×Median= Mode +2× Mean 
+3×149.03=148.05+2× Mean 
+Mean=149.52 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+1 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+1 
+ 
+1 
+ 
+ 
+1 
+1 
+ 
+                                                           Section E 
+ 
+ 
+36. 
+ 
+ 
+(i) Common difference of first progression= 3 
+ 
+ Common difference of first progression=  −3 
+ Sum of common difference=0. 
+ 
+ 
+(ii) t34 = 187 +(34-1) (−3) 
+So, t34 =88 
+ 
+(iii) (A) Sum =ଵ଴
+ଶ [2(−5)  + (10 − 1)(3)] 
+                        =  85                  
+OR 
+ 
+      (B) −5 +(n−1)3 = 187 +(n−1) (−3) 
+            n = 33 
+ 
+ 
+ 
+ 
+ 
+1 
+ 
+ 
+ 
+1 
+ 
+1 
+1 
+ 
+ 
+ 
+1 
+1 
+ 
+ 
+
+--- PAGE 11 ---
+Page 11 of 12 
+ 
+37. (i)  PR= ඥ(8−2)ଶ+(3−5)ଶ = 2√10   (ii) Co-ordinates of Q (4,4).      The mid-point of PR is (5,4)      ⸫Q is not the mid-point of PR   (iii) (A) Let the point be (𝑥,0)              So, ඥ(2 − 𝑥)ଶ+ 25 = ඥ(4 − 𝑥)ଶ+ 16            Hence 𝑥 = ଷ
+ସ.Therefore the point is (ଷ
+ସ,0).                OR      (B) The coordinates of S will be               ቀଶ×ସାଷ×ଶ
+ଶାଷ,ଶ×ସାଷ×ହ
+ଶାଷቁ            =  ቀଵସ
+ହ,ଶଷ
+ହቁ  
+ 
+1   ½ ½      1  1    1  1   38.  (i) Distance from India gate = 41m,   Height of monument = 42m,    Shreya’s height =1m     So, tan 𝜃=ସଵ
+ସଵ =1   Angle of elevation = 𝜃 = 45o.         (ii) Angle of elevation =60o Perpendicular = 41m   Let the distance from the India Gate be 𝑥 m Hence tan 60o= ସଵ
+௫ ⟹ 𝑥 =ସଵ
+√ଷ   ∴ Shreya is standing at a distance of ସଵ√ଷ
+ଷ  m   
+   ½  ½              ½ ½         
+
+
+--- PAGE 12 ---
+Page 12 of 12 
+ 
+  (iii) (A)  Distance from the India Gate = 41 m Let the distance moved back be 𝑥 m Then, tan30o = ସଵ
+ସଵା௫ 𝑥 = (41√3−41) m = 41(√3-1) m ∴ The distance moved back = 41(√3-1) m                              OR     (B) Let the angle of elevation of be 𝜃 Now, tan 𝜃 =  ସଵ
+రభ
+√య
+  = √3 This gives 𝛳 =60o 
+ 
+ 
+  1 1          
+ 
+ 1  1  

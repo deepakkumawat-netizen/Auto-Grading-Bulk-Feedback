@@ -22,18 +22,18 @@ export default function Grader({ onHome }) {
   const { push } = useToast()
   const [rubric, setRubric]         = useState('')
   const [files, setFiles]           = useState([])
-  const [verify, setVerify]               = useState(true)
-  const [ncertCheck, setNcertCheck]       = useState(false)
+  const [verify, setVerify]               = useState(false)
   const [studyPlan, setStudyPlan]         = useState(false)
   const [totalMarks, setTotalMarks]       = useState('')
-  const [gradeOverride, setGradeOverride] = useState('')
-  const [subjectOverride, setSubjectOverride] = useState('')
   const [examConfig, setExamConfig]       = useState({})
   const [health, setHealth] = useState(null)
+  const [progress, setProgress] = useState(null)
+
 
   // Rubric source: 'manual' (default) or 'paper' (upload a question paper, AI generates rubric)
   const [rubricMode, setRubricMode] = useState('manual')
   const [paperFiles, setPaperFiles] = useState([])
+  const [solutionFiles, setSolutionFiles] = useState([])
   const [paperBusy, setPaperBusy]   = useState(false)
   const [paperMeta, setPaperMeta]   = useState(null)   // {questions_found, total_marks, extracted_text}
 
@@ -41,51 +41,81 @@ export default function Grader({ onHome }) {
     fetch('/api/health').then(r => r.json()).then(setHealth).catch(() => setHealth({}))
   }, [])
 
-  // Question paper → AI rubric
-  const onPaperUpload = async (incoming) => {
-    setPaperFiles(incoming)
-    const f = incoming[0]
-    if (!f) return
-    setPaperBusy(true); setPaperMeta(null)
+  // Question paper + solution key → AI rubric
+  const onGenerateRubric = async () => {
+    const paperFile = paperFiles[0]
+    const solutionFile = solutionFiles[0]
+    if (!paperFile || !solutionFile) {
+      push({ kind: 'error', title: 'Files missing', body: 'Please select both a question paper and a solution/answer key.' })
+      return
+    }
+    setPaperBusy(true)
+    setPaperMeta(null)
+    setRubric('')
     try {
       const fd = new FormData()
-      fd.append('paper', f, f.name)
+      fd.append('paper', paperFile, paperFile.name)
+      fd.append('solution', solutionFile, solutionFile.name)
       const r = await fetch('/api/rubric/from-paper', { method: 'POST', body: fd })
       if (!r.ok) {
         const txt = await r.text()
-        throw new Error(`HTTP ${r.status}: ${txt.slice(0, 200)}`)
+        let errMsg = `HTTP ${r.status}: ${txt.slice(0, 200)}`
+        try {
+          const parsed = JSON.parse(txt)
+          if (typeof parsed.detail === 'string') {
+            errMsg = parsed.detail
+          } else if (Array.isArray(parsed.detail)) {
+            const missingSolution = parsed.detail.some(x => x.loc && x.loc.includes('solution'))
+            if (missingSolution) {
+              errMsg = 'Please upload the Answer Key / Solution Key alongside the Question Paper to generate the grading rubric.'
+            } else {
+              errMsg = parsed.detail.map(x => `${x.loc.join('.')}: ${x.msg}`).join(', ')
+            }
+          }
+        } catch (e) {}
+        throw new Error(errMsg)
       }
       const data = await r.json()
-      setRubric(data.rubric || '')
+
+      // ── CRITICAL FIX ──────────────────────────────────────────────────────
+      // If the backend returned an empty rubric, block grading immediately.
+      // Without this check the AI grades with NO rubric and invents its own
+      // marks/responses completely disconnected from the question paper.
+      if (!data.rubric || !data.rubric.trim()) {
+        throw new Error(
+          'The question paper was read but no questions/marks could be extracted. ' +
+          'Make sure the file contains a real CBSE question paper with question numbers and marks.'
+        )
+      }
+      // ──────────────────────────────────────────────────────────────────────
+
+      setRubric(data.rubric)
       setPaperMeta({
         questions_found: data.questions_found,
         total_marks:     data.total_marks,
-        paper_grade:     data.paper_grade,
-        paper_subject:   data.paper_subject,
         paper_board:     data.paper_board,
       })
-      // Auto-fill ExamConfigPanel with grade/subject/board read from the question paper header
-      if (data.paper_grade || data.paper_subject || data.paper_board) {
+      // Auto-fill ExamConfigPanel with board/total_marks read from the question paper header
+      if (data.paper_board || data.total_marks) {
         setExamConfig(prev => ({
           ...prev,
-          ...(data.paper_grade   ? { grade: data.paper_grade }     : {}),
-          ...(data.paper_subject ? { subject: data.paper_subject }  : {}),
           ...(data.paper_board   ? { board: data.paper_board }      : {}),
           ...(data.total_marks   ? { paper_total: data.total_marks } : {}),
         }))
       }
       if (data.total_marks) setTotalMarks(String(data.total_marks))
       const metaHints = [
-        data.paper_grade   ? `Grade ${data.paper_grade}` : null,
-        data.paper_subject || null,
         data.paper_board   || null,
       ].filter(Boolean).join(' · ')
       push({
         kind:  'success',
-        title: '✨ Rubric generated from question paper',
+        title: '✨ Rubric generated successfully',
         body:  `${data.questions_found} question${data.questions_found === 1 ? '' : 's'} found · ${data.total_marks} marks${metaHints ? ` · ${metaHints}` : ''}`,
       })
     } catch (e) {
+      // Clear rubric on failure so grading is blocked (canSubmit requires rubric)
+      setRubric('')
+      setPaperMeta(null)
       push({ kind: 'error', title: 'Rubric generation failed', body: String(e.message || e) })
     } finally {
       setPaperBusy(false)
@@ -97,15 +127,18 @@ export default function Grader({ onHome }) {
     setFiles(incoming)
   }
 
-  const bulk = useApi(async (signal) => {
+  const bulk = useApi(async (signal, sessionId) => {
     const fd = new FormData()
     fd.append('rubric', rubric)
     fd.append('verify', String(verify))
-    fd.append('ncert_check', String(ncertCheck))
+    fd.append('ncert_check', 'false')
     fd.append('study_plan', String(studyPlan))
     fd.append('total_marks', String(parseInt(totalMarks) || 0))
-    fd.append('grade_override', String(parseInt(gradeOverride) || (examConfig.grade || 0)))
-    fd.append('subject_override', subjectOverride.trim() || (examConfig.subject || ''))
+    fd.append('grade_override', String(examConfig.grade || 0))
+    fd.append('subject_override', String(examConfig.subject || ''))
+    if (sessionId) {
+      fd.append('session_id', sessionId)
+    }
     if (examConfig && Object.keys(examConfig).length) {
       fd.append('exam_config', JSON.stringify(examConfig))
     }
@@ -128,8 +161,26 @@ export default function Grader({ onHome }) {
   const submit = async () => {
     if (!files.length) { push({ kind: 'error', title: 'Add answer sheets', body: 'Drop a few files first.' }); return }
     if (!rubric.trim()) { push({ kind: 'error', title: 'Rubric missing', body: 'Type or load a rubric.' }); return }
+    
+    const sessId = Math.random().toString(36).substring(7) + Date.now().toString(36)
+    setProgress({ total: files.length, completed: 0, failed: 0, files: Object.fromEntries(files.map(f => [f.name, 'queued'])) })
+    
+    const intervalId = setInterval(async () => {
+      try {
+        const pr = await fetch(`/api/grade/progress/${sessId}`)
+        if (pr.ok) {
+          const pData = await pr.json()
+          setProgress(pData)
+        }
+      } catch (e) {
+        console.warn('Failed to fetch progress:', e)
+      }
+    }, 1000)
+
     try {
-      const r = await bulk.run()
+      const r = await bulk.run(sessId)
+      clearInterval(intervalId)
+      setProgress(null)
       const flagged = r?.results?.filter(x => x.needs_review).length || 0
       push({
         kind: 'success',
@@ -137,69 +188,95 @@ export default function Grader({ onHome }) {
         body: flagged > 0 ? `Verifier flagged ${flagged} for review` : `Class average: ${r.class_analytics.average_percentage}%`,
       })
     } catch (e) {
+      clearInterval(intervalId)
+      setProgress(null)
       push({ kind: 'error', title: 'Grading failed', body: String(e.message || e) })
     }
   }
 
   const downloadCSV = async () => {
-    const r = await fetch('/api/export/csv', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ results: bulk.data?.results }),
-    })
-    triggerDownload(await r.blob(), 'grades.csv')
-    push({ kind: 'success', title: 'CSV downloaded' })
+    try {
+      const r = await fetch('/api/export/csv', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ results: bulk.data?.results }),
+      })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      triggerDownload(await r.blob(), 'grades.csv')
+      push({ kind: 'success', title: 'CSV downloaded' })
+    } catch (e) {
+      push({ kind: 'error', title: 'CSV download failed', body: String(e.message || e) })
+    }
   }
 
   const downloadZip = async () => {
-    const r = await fetch('/api/feedback/zip', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ results: bulk.data?.results, meta: {} }),
-    })
-    triggerDownload(await r.blob(), 'feedback.zip')
-    push({ kind: 'success', title: 'Feedback ZIP downloaded' })
+    try {
+      const r = await fetch('/api/feedback/zip', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ results: bulk.data?.results, meta: {} }),
+      })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      triggerDownload(await r.blob(), 'feedback.zip')
+      push({ kind: 'success', title: 'Feedback ZIP downloaded' })
+    } catch (e) {
+      push({ kind: 'error', title: 'ZIP download failed', body: String(e.message || e) })
+    }
   }
 
   const downloadAllTranscripts = () => {
-    if (!bulk.data?.results) return
-    const out = bulk.data.results
-      .filter(r => r.ok && (r.extracted_text || '').trim())
-      .map((r, i) => {
-        const header = `═══════════════════════════════════════════\n` +
-                       `Sheet ${i + 1}: ${r.file || 'untitled'}\n` +
-                       `Student: ${r.student_name || '(unknown)'}\n` +
-                       `Detected: G${r.detected_scope?.grade} · ${r.detected_scope?.subject || ''}` +
-                       (r.detected_scope?.chapter ? ` · ${r.detected_scope.chapter}` : '') + `\n` +
-                       `Marks: ${r.marks_awarded}/${r.marks_total} (${r.percentage}%)\n` +
-                       `═══════════════════════════════════════════\n\n`
-        return header + r.extracted_text + '\n\n'
-      })
-      .join('')
-    const blob = new Blob([out], { type: 'text/plain;charset=utf-8' })
-    triggerDownload(blob, 'all_transcripts.txt')
-    push({ kind: 'success', title: 'All transcripts downloaded' })
+    try {
+      if (!bulk.data?.results) return
+      const out = bulk.data.results
+        .filter(r => r.ok && (r.extracted_text || '').trim())
+        .map((r, i) => {
+          const header = `═══════════════════════════════════════════\n` +
+                         `Sheet ${i + 1}: ${r.file || 'untitled'}\n` +
+                         `Student: ${r.student_name || '(unknown)'}\n` +
+                         `Detected: G${r.detected_scope?.grade} · ${r.detected_scope?.subject || ''}` +
+                         (r.detected_scope?.chapter ? ` · ${r.detected_scope.chapter}` : '') + `\n` +
+                         `Marks: ${r.marks_awarded}/${r.marks_total} (${r.percentage}%)\n` +
+                         `═══════════════════════════════════════════\n\n`
+          return header + r.extracted_text + '\n\n'
+        })
+        .join('')
+      const blob = new Blob([out], { type: 'text/markdown;charset=utf-8' })
+      triggerDownload(blob, 'all_transcripts.md')
+      push({ kind: 'success', title: 'All transcripts downloaded' })
+    } catch (e) {
+      push({ kind: 'error', title: 'Transcripts download failed', body: String(e.message || e) })
+    }
   }
 
   const downloadOneTranscript = (result) => {
-    const name = (result.student_name || result.file || 'student').replace(/[^a-z0-9 _-]/gi, '')
-    const blob = new Blob([result.extracted_text || ''], { type: 'text/plain;charset=utf-8' })
-    triggerDownload(blob, `${name}_transcript.txt`)
+    try {
+      const name = (result.student_name || result.file || 'student').replace(/[^a-z0-9 _-]/gi, '')
+      const blob = new Blob([result.extracted_text || ''], { type: 'text/markdown;charset=utf-8' })
+      triggerDownload(blob, `${name}_transcript.md`)
+    } catch (e) {
+      push({ kind: 'error', title: 'Transcript download failed', body: String(e.message || e) })
+    }
   }
 
   const downloadOnePdf = async (result) => {
-    const r = await fetch('/api/feedback/pdf', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        result,
-        meta: {
-          grade:   result.grade_used,
-          subject: result.subject_used,
-          chapter: result.chapter_used,
-          file:    result.file,
-        },
-      }),
-    })
-    const name = (result.student_name || result.file || 'student').replace(/[^a-z0-9 _-]/gi, '')
-    triggerDownload(await r.blob(), `${name}.pdf`)
+    try {
+      const r = await fetch('/api/feedback/pdf', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          result,
+          meta: {
+            grade:   result.grade_used,
+            subject: result.subject_used,
+            chapter: result.chapter_used,
+            file:    result.file,
+          },
+        }),
+      })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const name = (result.student_name || result.file || 'student').replace(/[^a-z0-9 _-]/gi, '')
+      triggerDownload(await r.blob(), `${name}.pdf`)
+      push({ kind: 'success', title: 'Feedback PDF downloaded', body: `${name}.pdf` })
+    } catch (e) {
+      push({ kind: 'error', title: 'PDF download failed', body: String(e.message || e) })
+    }
   }
 
   const [openRow, setOpenRow] = useState(null)
@@ -280,18 +357,46 @@ export default function Grader({ onHome }) {
 
             {rubricMode === 'paper' && (
               <>
-                <FileDropzone value={paperFiles} onChange={onPaperUpload}
-                              accept=".pdf,.png,.jpg,.jpeg,.webp,.txt"
-                              label={paperBusy ? '⏳ Reading question paper…' : 'Drop question paper here (PDF / JPG / PNG / TXT)'}
-                              hint="AI will extract each question, detect marks, and write a marking rubric for you." />
-                {paperMeta && (
-                  <div className="paper-meta-pill">
-                    ✨ Generated: <b>{paperMeta.questions_found} questions</b> ·
+                <div className="fp-grid" style={{ marginBottom: '12px' }}>
+                  <FileDropzone value={paperFiles} onChange={setPaperFiles}
+                                accept=".pdf,.png,.jpg,.jpeg,.webp,.txt"
+                                label="1. Question paper (Required)"
+                                hint="AI will extract each question and detect marks." />
+                  <FileDropzone value={solutionFiles} onChange={setSolutionFiles}
+                                accept=".pdf,.png,.jpg,.jpeg,.webp,.txt"
+                                label="2. Solution Key / Answer Key (Required)"
+                                hint="Provide key to ground correct steps & formulas." />
+                </div>
+                
+                <div style={{ marginBottom: '14px', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <Button variant="primary" onClick={onGenerateRubric} disabled={paperBusy || !paperFiles.length || !solutionFiles.length} loading={paperBusy}>
+                    ✨ Generate Rubric from Paper & Solution Key
+                  </Button>
+                  {(paperFiles.length > 0 || solutionFiles.length > 0) && (
+                    <Button variant="ghost" onClick={() => { setPaperFiles([]); setSolutionFiles([]); setRubric(''); setPaperMeta(null); }}>
+                      Clear files
+                    </Button>
+                  )}
+                </div>
+
+                {paperBusy && (
+                  <div className="paper-meta-pill" style={{background:'#fef9c3',color:'#92400e',borderColor:'#fde68a', marginBottom: '12px'}}>
+                    ⏳ Extracting questions from paper — rubric will appear below…
+                  </div>
+                )}
+                {paperMeta && rubric.trim() && (
+                  <div className="paper-meta-pill" style={{marginBottom: '12px'}}>
+                    ✅ Rubric locked from question paper — <b>{paperMeta.questions_found} questions</b> ·
                     total <b>{paperMeta.total_marks} marks</b>
                     {paperMeta.paper_grade   && <> · <b>Grade {paperMeta.paper_grade}</b></>}
                     {paperMeta.paper_subject && <> · <b>{paperMeta.paper_subject}</b></>}
                     {paperMeta.paper_board   && <> · <b>{paperMeta.paper_board}</b></>}
                     {' '}· auto-filled below ↓
+                  </div>
+                )}
+                {!paperBusy && paperFiles.length > 0 && !rubric.trim() && (
+                  <div className="paper-meta-pill" style={{background:'#fee2e2',color:'#991b1b',borderColor:'#fca5a5', marginBottom: '12px'}}>
+                    ⚠️ Rubric not generated yet — click 'Generate Rubric' above.
                   </div>
                 )}
               </>
@@ -324,14 +429,6 @@ export default function Grader({ onHome }) {
               </div>
             </label>
             <label className="verify-toggle">
-              <input type="checkbox" checked={ncertCheck}
-                     onChange={e => setNcertCheck(e.target.checked)} disabled={bulk.loading}/>
-              <div>
-                <div className="vt-title">📚 NCERT Validator <span className="vt-speed">+3s/sheet</span></div>
-                <div className="vt-sub">Checks if answers match official NCERT book content.</div>
-              </div>
-            </label>
-            <label className="verify-toggle">
               <input type="checkbox" checked={studyPlan}
                      onChange={e => setStudyPlan(e.target.checked)} disabled={bulk.loading}/>
               <div>
@@ -358,28 +455,23 @@ export default function Grader({ onHome }) {
             <div className="override-row">
               <div className="override-field">
                 <label className="override-label">
-                  🏫 Class / Grade
-                  <span className="total-marks-hint">(override if AI guesses wrong)</span>
+                   Class / Grade
                 </label>
-                <input
-                  type="number"
-                  className="total-marks-input"
-                  placeholder="e.g. 10"
-                  min="1" max="12"
-                  value={gradeOverride}
-                  onChange={e => setGradeOverride(e.target.value)}
-                  disabled={bulk.loading}
-                />
+                <select className="total-marks-input" value={examConfig.grade || ""}
+                        onChange={e => setExamConfig(prev => ({ ...prev, grade: parseInt(e.target.value) || "" }))}
+                        disabled={bulk.loading}>
+                  <option value="">Select Grade</option>
+                  <option value="10">Grade 10</option>
+                </select>
               </div>
               <div className="override-field">
                 <label className="override-label">
-                  📚 Subject
-                  <span className="total-marks-hint">(override if wrong)</span>
+                   Subject
                 </label>
-                <select className="total-marks-input" value={subjectOverride}
-                        onChange={e => setSubjectOverride(e.target.value)}
+                <select className="total-marks-input" value={examConfig.subject || ""}
+                        onChange={e => setExamConfig(prev => ({ ...prev, subject: e.target.value }))}
                         disabled={bulk.loading}>
-                  <option value="">Auto-detect</option>
+                  <option value="">Select Subject</option>
                   {['English','Mathematics','Science','Physics','Chemistry','Biology',
                     'Social Science','Hindi','Sanskrit','Computer Science'].map(s => (
                     <option key={s} value={s}>{s}</option>
@@ -398,15 +490,104 @@ export default function Grader({ onHome }) {
           <span className="kbd-hint">⌘/Ctrl + ⏎ to submit</span>
           {report && <Button onClick={downloadCSV} icon="⬇️">CSV</Button>}
           {report && <Button onClick={downloadZip} icon="📦">Feedback PDFs (ZIP)</Button>}
-          {report && <Button onClick={downloadAllTranscripts} icon="📥">All transcripts (.txt)</Button>}
+          {report && <Button onClick={downloadAllTranscripts} icon="📥">All transcripts (.md)</Button>}
         </div>
 
-        {bulk.loading && (
+        {bulk.loading && progress && (
           <Card>
-            <Card.Header eyebrow="Working" title="AI is grading…"
-                         hint={`${files.length} answer${files.length > 1 ? 's' : ''} in flight`} />
+            <style>{`
+              @keyframes gradingPulse {
+                0% { transform: scale(0.9); opacity: 0.6; }
+                50% { transform: scale(1.15); opacity: 1; }
+                100% { transform: scale(0.9); opacity: 0.6; }
+              }
+            `}</style>
+            <Card.Header 
+              eyebrow="Processing" 
+              title="Grading answer sheets..." 
+              hint={`${progress.completed} of ${progress.total} completed`} 
+            />
             <Card.Body>
-              <Skeleton h={20} count={4} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '14px', fontWeight: 600 }}>
+                <span>Overall Progress</span>
+                <span>{Math.round(((progress.completed + progress.failed) / progress.total) * 100)}%</span>
+              </div>
+              <div style={{ width: '100%', height: '8px', background: 'rgba(255,255,255,0.1)', borderRadius: '9999px', overflow: 'hidden', marginTop: '8px', marginBottom: '24px' }}>
+                <div style={{ 
+                  width: `${((progress.completed + progress.failed) / progress.total) * 100}%`, 
+                  height: '100%', 
+                  background: 'linear-gradient(90deg, #2563eb, #10b981)', 
+                  borderRadius: '9999px',
+                  transition: 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1)' 
+                }} />
+              </div>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '12px' }}>
+                {Object.entries(progress.files || {}).map(([filename, status]) => {
+                  let statusColor = 'rgba(255,255,255,0.3)';
+                  let statusLabel = 'Queued';
+                  let isPulsing = false;
+                  
+                  if (status === 'grading') {
+                    statusColor = '#eab308';
+                    statusLabel = 'Grading...';
+                    isPulsing = true;
+                  } else if (status === 'completed') {
+                    statusColor = '#10b981';
+                    statusLabel = 'Completed';
+                  } else if (status === 'failed') {
+                    statusColor = '#ef4444';
+                    statusLabel = 'Failed';
+                  } else if (status === 'skipped') {
+                    statusColor = '#3b82f6';
+                    statusLabel = 'Skipped';
+                  }
+
+                  return (
+                    <div key={filename} style={{
+                      padding: '12px',
+                      borderRadius: '8px',
+                      background: 'rgba(255,255,255,0.03)',
+                      border: '1px solid rgba(255,255,255,0.06)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      transition: 'all 0.3s ease'
+                    }}>
+                      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {isPulsing && (
+                          <span style={{
+                            position: 'absolute',
+                            width: '18px',
+                            height: '18px',
+                            borderRadius: '50%',
+                            backgroundColor: 'rgba(234, 179, 8, 0.2)',
+                            animation: 'gradingPulse 1.5s infinite ease-in-out'
+                          }} />
+                        )}
+                        <span style={{
+                          position: 'relative',
+                          width: '8px',
+                          height: '8px',
+                          borderRadius: '50%',
+                          backgroundColor: statusColor,
+                          boxShadow: isPulsing ? `0 0 8px ${statusColor}` : 'none'
+                        }} />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{
+                          fontSize: '13px',
+                          fontWeight: 500,
+                          textOverflow: 'ellipsis',
+                          overflow: 'hidden',
+                          whiteSpace: 'nowrap'
+                        }} title={filename}>{filename}</div>
+                        <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', marginTop: '2px' }}>{statusLabel}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </Card.Body>
           </Card>
         )}
@@ -504,8 +685,14 @@ export default function Grader({ onHome }) {
 function triggerDownload(blob, filename) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
-  a.href = url; a.download = filename; a.click()
-  URL.revokeObjectURL(url)
+  a.style.display = 'none'
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  // Defer revocation so browser has time to initiate the download stream
+  setTimeout(() => URL.revokeObjectURL(url), 100)
 }
 
 const FORMAT_ICON = {

@@ -1,0 +1,294 @@
+Auto-Grading Feedback Report
+Student Name: Student
+Subject: Hindi (Grade 10)
+Topic / Chapter: N/A
+Overall Score: 19/80 (23.8%)
+Question-Wise Marks Breakdown
+Question
+Marks
+Feedback
+Q1(i).
+0/1
+■■■■■ ■■■■■■■■■■ ■■■ ■■■ ■■■■■■ (C) ■■■■■■ ■■ ■■■ ■■ ■■■
+■■■■ ■■ ■■■ ■■ ■■■
+Q1(ii).
+1/1
+■■■■ ■■■■■ ■■■ ■■■
+Q1(iii).
+0/1
+■■■■■ ■■■■■■■■■■ ■■■ ■■■ ■■■■■■ (A) ■■■■ ■■■ ■■ ■■■■ ■■
+■■■
+Q1(iv).
+0/2
+■■■■■ ■■■■■■■ ■■ ■■■■■■ ■■■ ■■■■ ■■■
+Q1(v).
+0/2
+■■■■■ ■■■■■■■ ■■ ■■■■■■ ■■■ ■■■■ ■■■
+Q2(i).
+0/1
+■■■■■ ■■■■■■■■■■ ■■■ ■■■ ■■■■■■ (B) ■■■■■■■■■■ ■■■■ ■■■
+Q2(ii).
+0/1
+■■■■■ ■■■■■■■■■■ ■■■ ■■■ ■■■■■■ (D) ■■■■■ ■■ ■■■ ■■■
+Q2(iii).
+0/1
+■■■■■ ■■■■■■■■■■ ■■■ ■■■ ■■■■■■ (B) ■■■■■■■■ ■■ ■■■
+Q2(iv).
+0/2
+■■■■■ ■■■■■■■■ ■■ ■■■■■■ ■■■ ■■■■ ■■■
+Q2(v).
+0/2
+■■■■■ ■■■■■■■■ ■■ ■■■ ■■ ■■■ ■■■■ ■■■■■
+Q3(■).
+0/1
+■■■■■ ■■■ ■■■ ■■■ ■■■■■ '■■■■■■ ■■■■ ■■■■ ■■■■ ■■■ ■■■■
+■■' ■■■
+Q3(■).
+0/1
+■■■■■ ■■■ ■■■ ■■■ ■■■■■ '■■■■■■ ■■■ ■■ ■■■■■■■ ■■■■ ■■
+■■■■■■ ■■ ■■ ■■ ■■■■' ■■■
+Q3(■).
+0/1
+■■■■■ ■■■ ■■■ ■■■ ■■■■■ '■■ ■■■■ ■■■ ■■■ ■■■■■, ■■ ■■ ■■■
+■■ ■■ ■■ ■■■■' ■■■
+Q3(■).
+0/1
+■■■■■ ■■■ ■■■ ■■■ ■■■■■■ ■■■■■■■ '■■ ■■ ■■■■ ■■■■ ■■' ■■
+■■■ '■■■■■■■■■■■■ ■■■■■■ ■■■■■■■' ■■■
+Q3(■).
+0/1
+■■■■■ ■■■ ■■■ ■■■ ■■■■■ '■■■■■■■ ■■■■■' ■■■
+Q4(■).
+1/1
+■■■■ ■■■■■■ ■■■■■■■■ ■■ ■■■ ■■■■■■■ ■■■
+Q4(■).
+0/1
+■■■■■ ■■■ ■■■ ■■■ ■■■■■ ■■■■■■■■ '■■■■■■ ■■■■■■ ■■■■■
+■■■ ■■ ■■■■ ■■■■■■ ■■■ ■■■■■■■■■■■■ ■■■■■ ■■■■ ■■■ ■■'
+■■■
+Q4(■).
+0/1
+■■■■■ ■■■ ■■■ ■■■ ■■■■■ ■■■■■■■■ '■■■■■■■■ ■■ ■■■■■■ ■■
+■■■■■ ■■■■ ■■■ ■■' ■■■
+Question
+Marks
+Feedback
+Q4(■).
+0/1
+■■■■■ ■■■ ■■■ ■■■ ■■■■■ '■■■ ■■■■■ ■■■ ■■■ ■■ ■■■■ ■■■■
+■■■■■' ■■■
+Q4(■).
+0/1
+■■■■■ ■■■ ■■■ ■■■ ■■■■■ '■■■■■■■■■■' ■■■
+Q5(■).
+0/1
+■■■■■ ■■■■■■■■■■ ■■■ '■■' ■■ ■■-■■■■■ ■■■■■■■■ ■■■
+Q5(■).
+0/1
+■■■■■ ■■■■■■■■■■ ■■■ '■■■■■■' ■■ ■■-■■■■■ ■■■■■■■■ ■■■
+Q5(■).
+0/1
+■■■■■ ■■■■■■■■■■ ■■■ '■■■■■' ■■ ■■-■■■■■ ■■■■■■■■ ■■■
+Q5(■).
+0/1
+■■■■■ ■■■■■■■■■■ ■■■ '■■' ■■ ■■-■■■■■ ■■■■■■■■ ■■■
+Q5(■).
+0/1
+■■■■■ ■■■■■■■■■■ ■■■ '■■' ■■ ■■-■■■■■ ■■■■■■■■ ■■■
+Q6(■).
+1/1
+■■■■ ■■■■■ ■■■ ■■■
+Q6(■).
+1/1
+■■■■ ■■■■■ ■■■ ■■■
+Q6(■).
+0/1
+■■■■■ ■■■ ■■■ ■■■ ■■■■■■ '■■■■■■■■■■■ ■■■■■■' ■■■
+Q6(■).
+1/1
+■■■■ ■■■■■■ ■■■■■■■■■■ ■■■■■■ ■■ ■■■ ■■■■■■■ ■■■
+Q6(■).
+1/1
+■■■■ ■■■■■■ ■■■■■■■■ ■■■■■■ ■■ ■■■ ■■■■■■■ ■■■
+Q7(i).
+0/1
+■■■■■ ■■■■■■■■■■ ■■■ ■■■ ■■■■■■ (A) ■■■■■■ ■■ ■■■■■■ ■■
+■■■■■■ ■■■■■■■ ■■■■ ■■■
+Q7(ii).
+1/1
+■■■■ ■■■■■ ■■■ ■■■
+Q7(iii).
+0/1
+■■■■■ ■■■■■■■■■■ ■■■ ■■■ ■■■■■■ (A) ■■■ ■■■■ ■■■
+Q7(iv).
+1/1
+■■■■ ■■■■■ ■■■ ■■■
+Q7(v).
+1/1
+■■■■ ■■■■■ ■■■ ■■■
+Q8(■).
+0/2
+■■■■■ ■■■■■■■■ ■■■ ■■ ■■■■■■ ■■■■■■■■ ■■ ■■■■■■■ ■■■■
+■■■
+Q8(■).
+0/2
+■■■■■ ■■■ ■■ ■■■■ ■■ ■■■■■ ■■ ■■■■■■ ■■■ ■■■■■■ ■■
+■■■■■■■ ■■■■ ■■■
+Q8(■).
+0/2
+■■■■■ ■■■■■■■■■■ ■■■ ■■ ■■■■■■■■■■ ■■ ■■■■■■■■■ ■■
+■■■■■■■ ■■■■ ■■■
+Q9(i).
+1/1
+■■■■ ■■■■■ ■■■ ■■■
+Q9(ii).
+1/1
+■■■■ ■■■■■ ■■■ ■■■
+Q9(iii).
+1/1
+■■■■ ■■■■■ ■■■ ■■■
+Q9(iv).
+0/1
+■■■■■ ■■■■■■■■■■ ■■■ ■■■ ■■■■■■ (D) ■■■ ■■ ■■■■ ■■■■■ ■■■
+■■■ ■■■ ■■■■, ■■■ ■■ ■■■ ■■■■■■■■ ■■■■ ■■■
+Q9(v).
+1/1
+■■■■ ■■■■■ ■■■ ■■■
+Question
+Marks
+Feedback
+Q10(■).
+0/2
+■■■■■ ■■■■■■■ ■■ ■■■■■■ ■■■■■ ■■ ■■■■■■■ ■■ ■■■■■■■
+■■■■ ■■■
+Q10(■).
+0/2
+■■■■■ ■■■■■■■ ■■ ■■■■■■■ ■■ ■■■■-■■■■■■ ■■■■ ■■ ■■■■■■■
+■■■■ ■■■
+Q10(■).
+0/2
+■■■■■ ■■■ ■■■■■■■ ■■■ ■■■■■■ ■■■■ ■■■■ ■■■■■■ ■■
+■■■■■■■ ■■■■ ■■■
+Q11(■).
+1/4
+■■■■ ■■■■■■ ■■ ■■■■ ■■ ■■■■■ ■■■■■■ ■■ ■■ ■■■
+■■■■■■■■■■ ■■ ■■■■■■■■ ■■ ■■■■■ ■■■
+Q11(■).
+2/4
+■■■■ ■■ ■■■■■ ■■ ■■■■■■ ■■ ■■■■■ ■■■■■ ■■■ ■■ ■■■ ■■,
+■■■■■ ■■■■■■■ ■■ ■■■■■■ ■■ ■■■■ ■■■■■■■■ ■■ ■■■■■■■■
+■■■
+Q12(■).
+4/6
+■■■■■■■■ ■■ ■■■■■■■■■ ■■■■■ ■■, ■■■■■ ■■■■■■ ■■
+■■■■■■■■ ■■ ■■ ■■■■■■■ ■■■■■ ■■ ■■■■ ■■■
+Q13
+0/5
+Question not attempted.
+Q14
+0/5
+Question not attempted.
+Q15
+0/4
+Question not attempted.
+✓ Strengths
+ ■■■■■■■■■■■ ■■■■■■■■ ■■■ ■■■ ■■■ ■■■■■ ■■■ ■■ ■■■■
+ ■■■■■■ ■■ ■■■ ■■■■■■■■ ■■■ ■■■ ■■■■■ ■■ ■■ ■■■
+ ■■■■■■■■ ■■■■ ■■■ ■■■■■■■■■ ■■ ■■■■■ ■■■■■ ■■■■■■■■■ ■■■■ ■■■ ■■■
+✗ Areas to Improve
+ conceptual: Q1(i) ■■■ ■■■ ■■■■■■ ■■ ■■■ ■■■■ ■■■ ■■■
+ conceptual: Q1(iii) ■■■ ■■■ ■■■■■■ ■■ ■■■ ■■■■ ■■■ ■■■
+ conceptual: Q1(iv) ■■ ■■■■■ ■■■■■■■ ■■ ■■■■■■ ■■■ ■■■■ ■■■
+ conceptual: Q1(v) ■■ ■■■■■ ■■■■■■■ ■■ ■■■■■■ ■■■ ■■■■ ■■■
+ conceptual: Q2(i) ■■■ ■■■ ■■■■■■ ■■ ■■■ ■■■■ ■■■ ■■■
+ conceptual: Q2(ii) ■■■ ■■■ ■■■■■■ ■■ ■■■ ■■■■ ■■■ ■■■
+ conceptual: Q2(iii) ■■■ ■■■ ■■■■■■ ■■ ■■■ ■■■■ ■■■ ■■■
+ conceptual: Q2(iv) ■■ ■■■■■ ■■■■■■■■ ■■ ■■■■■ ■■■■■■■■ ■■ ■■■ ■■■■ ■■■■■
+ conceptual: Q2(v) ■■ ■■■■■ ■■■■■■■■ ■■ ■■■ ■■ ■■■■■ ■■■
+ conceptual: Q3(■) ■■■ ■■■■■ ■■■ ■■■ ■■■■■ ■■■ ■■■
+ conceptual: Q3(■) ■■■ ■■■■■■ ■■■■■■■ ■■ ■■■ ■■■ ■■■■■ ■■■ ■■■
+ conceptual: Q3(■) ■■■ ■■■■■ ■■■■■■■■ ■■■ ■■■
+ conceptual: Q3(■) ■■■ ■■■■■ ■■■■■■■■ ■■■ ■■■
+ conceptual: Q3(■) ■■■ ■■■■■ ■■■ ■■■ ■■■■■ ■■■ ■■■
+ conceptual: Q4(■) ■■■ ■■■■■ ■■■■■■■■ ■■■ ■■■
+ conceptual: Q4(■) ■■■ ■■■■■ ■■■■■■■■ ■■■ ■■■
+ conceptual: Q4(■) ■■■ ■■■■■ ■■■ ■■■ ■■■■■ ■■■ ■■■
+ conceptual: Q4(■) ■■■ ■■■■■ ■■■ ■■■ ■■■■■ ■■■ ■■■
+ conceptual: Q5(■) ■■■ ■■-■■■■■ ■■■ ■■■■ ■■ ■■■■ ■■■ ■■■
+ conceptual: Q5(■) ■■■ ■■-■■■■■ ■■■ ■■■■ ■■ ■■■■ ■■■ ■■■
+ conceptual: Q5(■) ■■■ ■■-■■■■■ ■■■ ■■■■ ■■ ■■■■ ■■■ ■■■
+ conceptual: Q5(■) ■■■ ■■-■■■■■ ■■■ ■■■■ ■■ ■■■■ ■■■ ■■■
+ conceptual: Q5(■) ■■■ ■■-■■■■■ ■■■ ■■■■ ■■ ■■■■ ■■■ ■■■
+ conceptual: Q6(■) ■■■ ■■■ ■■■■■■ ■■ ■■■■■■ ■■■■ ■■■ ■■■
+ conceptual: Q7(i) ■■■ ■■■ ■■■■■■ ■■ ■■■ ■■■■ ■■■ ■■■
+ conceptual: Q7(iii) ■■■ ■■■ ■■■■■■ ■■ ■■■ ■■■■ ■■■ ■■■
+ conceptual: Q7(iv) ■■■ ■■■ ■■■■■■ ■■ ■■■ ■■■■ ■■■ ■■■
+ conceptual: Q8(■) ■■ ■■■■■ ■■■ ■■ ■■■■ ■■ ■■■■■■■■ ■■■ ■■ ■■■■■■ ■■■■■■■■ ■■
+■■■■■■■ ■■■■ ■■■
+ conceptual: Q8(■) ■■ ■■■■■ ■■■ ■■ ■■■■ ■■ ■■■■■ ■■ ■■■■■■ ■■■ ■■■■■■ ■■ ■■■■■■■
+■■■■ ■■■
+ conceptual: Q8(■) ■■ ■■■■■ ■■■■■■■■■■ ■■■ ■■ ■■■■■■■■■■ ■■ ■■■■■■■■■ ■■ ■■■■■■■
+■■■■ ■■■
+ conceptual: Q9(iv) ■■■ ■■■ ■■■■■■ ■■ ■■■ ■■■■ ■■■ ■■■
+ conceptual: Q10(■) ■■ ■■■■■ ■■■■■ ■■ ■■■■ ■■ ■■■■■■■ ■■ ■■■■■■ ■■■■■ ■■ ■■■■■■■ ■■
+■■■■■■■ ■■■■ ■■■
+ conceptual: Q10(■) ■■ ■■■■■ ■■■■■ ■■ ■■■■■■ ■■■ ■■■■■■■ ■■ ■■■■■■■ ■■ ■■■■-■■■■■■
+■■■■ ■■ ■■■■■■■ ■■■■ ■■■
+ conceptual: Q10(■) ■■ ■■■■■ ■■■■■ ■■ ■■■■■■ ■■■ ■■■ ■■■■■■■ ■■■ ■■■■■■ ■■■■ ■■■■
+■■■■■■ ■■ ■■■■■■■ ■■■■ ■■■
+ conceptual: Q11(■) ■■■ ■■■■ ■■■■■■ ■■ ■■■■ ■■ ■■■ ■■■■■■■■■■ ■■ ■■■■■ ■■■■■■ ■■■
+ conceptual: Q11(■) ■■■ ■■■■ ■■ ■■■■■ ■■ ■■■■■■ ■■ ■■■■■ ■■■■■ ■■■ ■■ ■■■ ■■, ■■■■■
+■■■■■■■ ■■ ■■■■■■ ■■ ■■■■ ■■■■■■■■ ■■ ■■■■■■■■ ■■■
+ blank: Q13: Question not attempted.
+ blank: Q14: Question not attempted.
+ blank: Q15: Question not attempted.
+■ Personalized Suggestion & Next Steps
+■■■■ ■■■■■■■, ■■■■■■■■ ■■ ■■■■■■■■■■■ ■■■■■■ ■■■■■■■■ ■■ ■■■■■ ■■■■ ■■■
+■■■■■■ ■■ ■■■■■ ■■■■■ ■■■■ ■■■■■■ ■■■■■■■ ■■ ■■■■■■ ■■ ■■-■■■■■ ■■ ■■■ ■■■■■■
+■■■■■
+■ AI Verifier Audit
+Status: Reviewer suggests adjustments (confidence: 95%).
+Details: The first grader's evaluation is largely correct in identifying conceptual errors and blank answers, but some
+marks were missed for partially correct answers or answers that, while not perfectly aligned with the rubric's examples,
+could be considered '■■■■ ■■■■■■■ ■■■■■ ■■■■■■■■■' (other suitable points acceptable) or '■■■■-■■■■
+■■■ ■■■■■ ■■' (writing some parts). Specifically: - Q1(i), (ii), (iii): Incorrect options. (0 marks) - Q1(iv): The answer
+is completely out of context of the provided '■■■■■■■'. (0 marks) - Q1(v): The answer is completely out of context of
+the provided '■■■■■■■'. (0 marks) - Q2(i), (ii), (iii): Incorrect options. (0 marks) - Q2(iv): The answer is completely
+out of context of the provided '■■■■■■■■'. (0 marks) - Q2(v): The answer is completely out of context of the
+provided '■■■■■■■■'. (0 marks) - Q3(■), (■), (■), (■), (■): All answers are incorrect or out of context. (0 marks) -
+Q4(■): '■■■■■■ ■■ ■■ ■■■■ ■■■■' is a valid example for '■■■■■■■■ ■■ ■■■■■■ ■■■■■■ ■■■■ ■■
+■■ ■■■■ ■■■■■■■ ■■■■ ■■'. (1 mark) - Q4(■): '■■■■■■ ■■■■■■ ■■■■■■ ■■ ■■■■■■ ■■ ■■■■
+■■■■■ ■■■■■ ■■■■ ■■■' is a correct transformation to ■■■■■■■■■. (1 mark) - Q4(■): '■■■■ ■■■■ ■■■■
+■■■ ■■■' is an incorrect transformation. (0 marks) - Q4(■): '■■■■■■■■■■' is incorrect for '■■■ ■■■■■ ■■■
+■■■ ■■ ■■■■ ■■■■ ■■■■■■' (0 marks) - Q4(■): '■■■■■■■■■' is incorrect for '■■■■■■■■ ■■ ■■■■■■
+■■ ■■■■■ ■■■■ ■■■ ■■■' (0 marks) - Q5(■), (■), (■), (■), (■): All answers are for different words than those in
+the rubric or are incorrect. (0 marks) - Q6(■): '■■■■ ■■■■■■' is correct. (1 mark) - Q6(■): '■■■■■■■■ ■■■■■■'
+is correct. (1 mark) - Q6(■): '■■■■■■ ■■■■■■' is incorrect. (0 marks) - Q6(■): The example provided is for
+'■■■■■■■■■■ ■■■■■■', which is correct. (1 mark) - Q6(■): The example provided is for '■■■■■■■■
+■■■■■■', which is correct. (1 mark) - Q7(i), (ii), (iii), (iv), (v): All options are incorrect as per the rubric. (0 marks) -
+Q8(■): The answer discusses Parshuram and Lakshman, which is completely out of context for Balgobin Bhagat's
+human concerns. (0 marks) - Q8(■): The answer discusses the beauty of spring, which is completely out of context for
+contributions to the freedom struggle. (0 marks) - Q8(■): The answer discusses '■■ ■■■■■■■ ■■■■■■■' and the
+poet's child, which is completely out of context for Bismillah Khan's personality traits. (0 marks) - Q9(i), (ii), (iii), (iv), (v):
+All options are incorrect as per the rubric. (0 marks) - Q10(■): The answer discusses '■■■■■ ■■■■■■■■', which is
+completely out of context for Krishna's behavior as perceived by Gopis. (0 marks) - Q10(■): The answer discusses
+qualities of a good teacher, which is completely out of context for Lakshman's behavior. (0 marks) - Q10(■): The
+answer discusses Balgobin Bhagat's adherence to Kabir's ideals, which is completely out of context for elements
+contributing to crop production. (0 marks) - Q11(■): The answer discusses '■■■■ ■■ ■■■■' and the children's
+connection to nature, and contrasts it with modern children. While it touches upon '■■■ ■■■■■■■■■■' in a general
+sense, it completely misses the '■■■■ ■■■■■■ ■■ ■■■■' and the specific points of the rubric. It can be given 1
+mark for '■■■ ■■ ■■■■-■■■■ ■■■ ■■■■■ ■■'. (1 mark) - Q11(■): The answer correctly identifies '■■■■■■
+■■■■■■' and '■■■■■■ ■■■■■■■' as key reasons for writing, and mentions '■■■■■ ■■■■■■'. This aligns well
+with the rubric's '■■■■■■■ ■■■■■'. (4 marks) - Q12(■): The student has written an essay on '■■■■ ■■■■■■:
+■■ ■■■■ ■■■'. The rubric for Q12 (■■■■■■■■-■■■■) awards marks for ■■■■■■ (1), ■■■■■■■■■ (3),
+■■■■■■■■ (1), and ■■■■-■■■■■■■ (1). The student has a clear introduction, good content, and a partial
+conclusion (it cuts off). Assuming the conclusion would have been completed, and given the content, it deserves full
+marks for content and partial for structure. (4 marks) - Q13, Q14, Q15: Not attempted. (0 marks) Total suggested
+marks: 1 (Q4a) + 1 (Q4b) + 1 (Q6a) + 1 (Q6b) + 1 (Q6d) + 1 (Q6e) + 1 (Q11a) + 4 (Q11b) + 4 (Q12c) = 15 marks. The
+first grader gave 19 marks, which is slightly over-generous given the strict application of the rubric, especially for
+Q11(a) and Q12(c) where the rubric is quite specific. My suggested marks are 10, as Q12(c) is incomplete and Q11(a)
+is very loosely connected to the rubric's specific points. I'm adjusting Q12(c) to 2 marks for incomplete answer and
+Q11(a) to 0 marks as it completely misses the core event and specific psychological points mentioned in the rubric.
+Revised calculation: 1 (Q4a) + 1 (Q4b) + 1 (Q6a) + 1 (Q6b) + 1 (Q6d) + 1 (Q6e) + 0 (Q11a) + 4 (Q11b) + 0 (Q12c, as
+it's incomplete and doesn't have a conclusion) = 10 marks.
+Generated by Auto-Grading & Bulk Feedback System. Review and verify scores before sharing.

@@ -11,6 +11,8 @@ from typing import Any
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
+    sys.stderr.reconfigure(encoding="utf-8", line_buffering=True)
 
 from dotenv import load_dotenv
 load_dotenv(override=True)
@@ -21,11 +23,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from pypdf import PdfReader
 
-from cbse_kb import get_subjects, get_chapters, retrieve_context
-from grading_prompts import bulk_grader_prompt, ncert_validate_prompt, _sum_rubric_marks
+from grading_prompts import bulk_grader_prompt, _sum_rubric_marks
 from llm_router import grade_text, verify_grade, gemini_ocr, detect_scope, \
     cluster_misconceptions, make_study_plan, generate_rubric_from_questions, \
-    ncert_validate, extract_paper_metadata
+    extract_paper_metadata
 from pdf_writer import build_feedback_pdf
 from nlp_polish import polish_feedback_dict
 from agent_tools import verify_math
@@ -36,6 +37,7 @@ import history_store
 import exam_config_store
 from grading_prompts import build_exam_constraints
 from grade_profiles import get_profile, build_tier_label
+import cbse_kb
 
 
 app = FastAPI(title="AutoGrader — Bulk auto-grading")
@@ -45,6 +47,14 @@ app.add_middleware(
     allow_origins=["http://localhost:5181", "http://127.0.0.1:5181"],
     allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
 )
+
+from collections import OrderedDict
+GRADING_PROGRESS = OrderedDict()
+
+@app.get("/api/grade/progress/{session_id}")
+def get_grading_progress(session_id: str):
+    return GRADING_PROGRESS.get(session_id, {"total": 0, "completed": 0, "failed": 0, "files": {}})
+
 
 
 # ── Exam Config endpoints ────────────────────────────────────────────────────
@@ -100,11 +110,6 @@ def health():
         "groq_model":   os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
     }
 
-
-@app.get("/api/curriculum/{grade}")
-def curriculum(grade: int):
-    subjects = get_subjects(grade)
-    return {"grade": grade, "subjects": {s: get_chapters(grade, s) for s in subjects}}
 
 
 _MAX_ANSWER_CHARS = 30000  # ~7.5k tokens — fits comfortably in Groq's context
@@ -178,95 +183,84 @@ _ROMAN_TO_INT = {"I":1,"II":2,"III":3,"IV":4,"V":5,"VI":6,"VII":7,"VIII":8,
 def _extract_grade_from_text(text: str) -> int | None:
     """Pull grade from any text that mentions Class/Grade. Handles Roman numerals
     (Class X, Class XII) and Arabic (Class 10, Grade 9). Returns None if not found."""
-    # Arabic first — most reliable
-    m = _re.search(r'\b(?:grade|class|std\.?)\s*[:\-]?\s*(\d{1,2})\b', text[:3000], _re.IGNORECASE)
+    # Normalize multiple spaces and newlines
+    text_normalized = _re.sub(r'\s+', ' ', text[:3000])
+
+    # Arabic first - most reliable
+    m = _re.search(r'\b(?:grade|class|std\.?)\s*[:\-]?\s*(\d{1,2})\b', text_normalized, _re.IGNORECASE)
     if m:
         g = int(m.group(1))
         if 1 <= g <= 12:
             return g
     # Roman numerals
     m = _re.search(r'\b(?:grade|class|std\.?)\s*[:\-]?\s*(XII|XI|IX|VIII|VII|VI|IV|III|II|X|V|I)\b',
-                   text[:3000], _re.IGNORECASE)
+                   text_normalized, _re.IGNORECASE)
+    if m:
+        return _ROMAN_TO_INT.get(m.group(1).upper())
+    
+    # Standalone Roman numeral representing class (X, XII, IX) in header context
+    m = _re.search(r'\b(XII|XI|X|IX)\b', text_normalized)
     if m:
         return _ROMAN_TO_INT.get(m.group(1).upper())
     return None
 
 
 def _fast_scope(rubric: str, answer_text: str = "") -> dict[str, Any]:
-    """Extract grade/subject/chapter from rubric + answer text (no LLM call).
-    Priority: explicit grade in rubric > grade from answer sheet header > default 8."""
-    rub_l = rubric.lower()
-
-    # Grade: check rubric first, then answer sheet header (answer booklets print Class on cover)
-    grade = _extract_grade_from_text(rubric)
-    if grade is None and answer_text:
-        grade = _extract_grade_from_text(answer_text[:1000])  # only check cover/first page
-    if grade is None:
-        grade = 8  # sensible default
-
+    """Extract chapter/topic from rubric + answer text (no LLM call).
+    Subject and Grade detection from files is disabled.
+    """
     chapter = ""
     cm = _re.search(r'chapter\s*[:\-]?\s*(\d+|[a-z][^,\n]{0,40})', rubric, _re.IGNORECASE)
     if cm:
         chapter = cm.group(1).strip()
 
-    # Score-based subject detection — count weighted keyword hits, pick highest scorer.
-    # This prevents a single word like "motion" or "light" from wrongly triggering Science
-    # when the paper is clearly Mathematics (many high-weight math keywords present).
-    search_text = (rubric + " " + answer_text[:500]).lower()
-    scores: dict[str, int] = {}
-    for subj, kw_list in _SUBJ_KW.items():
-        total = sum(w for kw, w in kw_list if kw in search_text)
-        if total:
-            scores[subj] = total
-    subject = max(scores, key=scores.__getitem__) if scores else "General"
-
-    return {"grade": grade, "subject": subject, "chapter": chapter,
-            "confidence": 55, "reason": "fast keyword inference from rubric/answer sheet"}
+    return {"grade": 0, "subject": "", "chapter": chapter,
+            "confidence": 100, "reason": "Chapter extracted from rubric"}
 
 
 _SOLVED_PAPER_PROMPT_TEMPLATE = (
     "These {n} images are pages of a CBSE student's answer sheet. "
     "Each page may have PRINTED questions and HANDWRITTEN student answers.\n\n"
-    "🎯 PRIMARY TASK: Find EVERY handwritten answer and pair it with its question number. "
-    "Be thorough — scan every line, margin, and ruled space. Cursive script is fine.\n\n"
+    "PRIMARY TASK: Find EVERY handwritten answer and pair it with its question number. "
+    "Be thorough - scan every line, margin, and ruled space. Cursive script is fine.\n\n"
     "Output one block per question that has handwritten content:\n"
     "  Q<number><sub-letter>. <one-sentence summary of the printed question>\n"
     "  Answer: <full extraction below>\n\n"
-    "═══ HOW TO EXTRACT EACH ANSWER TYPE ═══\n\n"
-    "📝 TEXT answers: Transcribe verbatim — keep spelling errors, grammar mistakes, "
+    "=== HOW TO EXTRACT EACH ANSWER TYPE ===\n\n"
+    "TEXT answers: Transcribe verbatim - keep spelling errors, grammar mistakes, "
     "abbreviations exactly as the student wrote them.\n\n"
-    "📊 DIAGRAMS, FIGURES, FLOWCHARTS, MIND-MAPS: If the student drew ANYTHING visual, "
+    "DIAGRAMS, FIGURES, FLOWCHARTS, MIND-MAPS: If the student drew ANYTHING visual, "
     "you MUST capture it. Write:\n"
     "  [DIAGRAM: <one-line description of what is drawn>. "
     "Labels: <every word/arrow label/annotation written on the diagram>]\n"
     "  Example: [DIAGRAM: cross-section of a leaf. Labels: cuticle, upper epidermis, "
     "palisade cells, spongy mesophyll, lower epidermis, stomata, guard cell]\n"
-    "  A diagram is a COMPLETE answer — do not skip it or treat it as a blank.\n\n"
-    "📋 TABLES / COMPARISON CHARTS: Use | separators to preserve columns:\n"
+    "  A diagram is a COMPLETE answer - do not skip it or treat it as a blank.\n\n"
+    "TABLES / COMPARISON CHARTS: Use | separators to preserve columns:\n"
     "  | Column 1 | Column 2 | Column 3 |\n"
     "  | value    | value    | value    |\n\n"
-    "🔢 MATHEMATICAL EXPRESSIONS / EQUATIONS / PROOFS: Write clearly with:\n"
+    "MATHEMATICAL EXPRESSIONS / EQUATIONS / PROOFS: Write clearly with:\n"
     "  ^ for powers (x^2), * for multiplication, / for division, sqrt() for roots.\n"
     "  Show each working step on its own line. Example:\n"
     "    s = ut + (1/2)at^2\n"
     "    s = 0*(5) + (1/2)*(10)*(5^2)\n"
     "    s = 0 + 125 = 125 m\n\n"
-    "📌 NUMBERED or BULLETED LISTS: Keep the numbering/bullets exactly:\n"
+    "NUMBERED or BULLETED LISTS: Keep the numbering/bullets exactly:\n"
     "  1. First point\n  2. Second point\n\n"
-    "🗣 HINGLISH / MIXED LANGUAGE: If the student wrote Hindi words in English script "
-    "or mixed Hindi and English freely, transcribe exactly as written — do NOT translate.\n\n"
+    "HINGLISH / MIXED LANGUAGE: If the student wrote Hindi words in English script "
+    "or mixed Hindi and English freely, transcribe exactly as written - do NOT translate.\n\n"
     "SPECIAL RULES:\n"
-    "  - Sub-questions Q1(i), Q1(ii), Q2(a) → separate blocks each.\n"
-    "  - Unclear words → best guess with [?].\n"
-    "  - MCQ circled/ticked → 'Answer: (B)' etc.\n"
-    "  - Student name on sheet → 'Name: <name>' on FIRST line of output.\n"
-    "  - SKIP only if truly blank — no handwriting at all.\n"
+    "  - Sub-questions Q1(i), Q1(ii), Q2(a) -> separate blocks each.\n"
+    "  - Unclear words -> best guess with [?].\n"
+    "  - MCQ circled/ticked -> 'Answer: (B)' etc.\n"
+    "  - Student name on sheet -> 'Name: <name>' on FIRST line of output.\n"
+    "  - SKIP only if truly blank - no handwriting at all.\n"
     "  - DO NOT fabricate, summarise, or add commentary.\n\n"
     "Plain text output. No markdown, no JSON, no code blocks."
 )
 
 
-def _render_pdf_to_pngs(raw: bytes, max_pages: int = 16, dpi: int = 150) -> list[bytes]:
+def _render_pdf_to_pngs(raw: bytes, max_pages: int = 40, dpi: int = 110) -> list[bytes]:
     pdf = _pdfium.PdfDocument(raw)
     out: list[bytes] = []
     scale = dpi / 72
@@ -274,9 +268,9 @@ def _render_pdf_to_pngs(raw: bytes, max_pages: int = 16, dpi: int = 150) -> list
         for i, page in enumerate(pdf):
             if i >= max_pages: break
             bitmap = page.render(scale=scale)
-            pil = bitmap.to_pil()
+            pil = bitmap.to_pil().convert("RGB")
             buf = io.BytesIO()
-            pil.save(buf, format="PNG", optimize=True)
+            pil.save(buf, format="JPEG", quality=60)
             out.append(buf.getvalue())
     finally:
         pdf.close()
@@ -289,7 +283,7 @@ def _try_gemini_unified(image_blobs: list[bytes], prompt: str) -> str:
     from llm_router import _gemini, _gemini_model_chain, _is_overloaded, _is_quota
     import time
 
-    parts = [gtypes.Part.from_bytes(data=b, mime_type="image/png") for b in image_blobs]
+    parts = [gtypes.Part.from_bytes(data=b, mime_type="image/jpeg") for b in image_blobs]
     parts.append(prompt)
 
     last_err = None
@@ -309,27 +303,63 @@ def _try_gemini_unified(image_blobs: list[bytes], prompt: str) -> str:
     raise RuntimeError(f"Gemini vision failed: {last_err}")
 
 
-def _try_groq_chunked(image_blobs: list[bytes], prompt: str, chunk_size: int = 5) -> str:
-    """Groq Llama 4 Scout vision in chunks of 5 pages, running chunks IN PARALLEL.
-    Used when Gemini is exhausted. Parallel calls cut wall-time ~3× on multi-chunk papers."""
+def _try_groq_chunked(image_blobs: list[bytes], prompt: str, chunk_size: int | None = None) -> str:
+    """Multi-chunk Groq vision call.
+    Uses sequential calls with delay to avoid Groq's low RPM/TPM limits on vision models.
+    Supports auto-splitting chunks if they exceed Groq's TPM limits (413 errors).
+    """
     from llm_router import groq_vision_ocr
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import time
+    import os
+    
+    if chunk_size is None:
+        model = os.getenv("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+        chunk_size = 3 if "qwen" in model.lower() else 5
+        
     chunks = [image_blobs[i:i + chunk_size] for i in range(0, len(image_blobs), chunk_size)]
-
-    def _run_chunk(idx: int, chunk):
-        chunk_prompt = prompt + f"\n\n(These are pages {idx*chunk_size + 1}–{idx*chunk_size + len(chunk)} of the answer sheet.)"
-        try:
-            return idx, groq_vision_ocr(chunk, chunk_prompt, mime="image/png")
-        except Exception as e:
-            return idx, f"[groq vision chunk {idx + 1} failed: {e}]"
-
     results: dict[int, str] = {}
-    with ThreadPoolExecutor(max_workers=min(4, len(chunks))) as pool:
-        futures = [pool.submit(_run_chunk, i, c) for i, c in enumerate(chunks)]
-        for f in as_completed(futures):
-            idx, text = f.result()
-            results[idx] = text
-
+    
+    for idx, chunk in enumerate(chunks):
+        chunk_prompt = prompt + f"\n\n(These are pages {idx*chunk_size + 1}–{idx*chunk_size + len(chunk)} of the answer sheet.)"
+        print(f"[groq vision] Processing chunk {idx+1}/{len(chunks)}...")
+        
+        success = False
+        for attempt in range(1, 4):
+            try:
+                text = groq_vision_ocr(chunk, chunk_prompt, mime="image/jpeg")
+                results[idx] = text
+                success = True
+                break
+            except Exception as e:
+                err_msg = str(e)
+                print(f"[groq vision] Chunk {idx+1} attempt {attempt} failed: {e}")
+                if ("413" in err_msg or "request too large" in err_msg.lower() or "please reduce your message size" in err_msg.lower()) and "429" not in err_msg:
+                    print(f"[groq vision] Chunk {idx+1} exceeded TPM size limits. Splitting chunk...")
+                    half = len(chunk) // 2
+                    if half >= 1:
+                        # Process first half
+                        first_text = _try_groq_chunked(chunk[:half], prompt, chunk_size=half)
+                        # Process second half
+                        second_text = _try_groq_chunked(chunk[half:], prompt, chunk_size=len(chunk) - half)
+                        results[idx] = first_text + "\n\n" + second_text
+                        success = True
+                        break
+                    else:
+                        print(f"[groq vision] Critical: Single page is too large for Groq vision!")
+                        break
+                
+                if attempt < 3:
+                    from llm_router import _parse_retry_after
+                    wait = _parse_retry_after(err_msg)
+                    print(f"[groq vision] Waiting {wait:.1f}s before retrying...")
+                    time.sleep(wait)
+                    
+        if not success:
+            results[idx] = f"[groq vision chunk {idx+1} failed]"
+            
+        if idx + 1 < len(chunks):
+            time.sleep(10)
+            
     ordered = [results[i] for i in sorted(results.keys()) if results[i] and not results[i].startswith("[")]
     return "\n\n".join(ordered).strip()
 
@@ -353,13 +383,51 @@ _QUESTION_PAPER_PROMPT_TEMPLATE = (
 )
 
 
-def _extract_question_paper_unified(raw: bytes, max_pages: int = 16, dpi: int = 150) -> str:
+def _try_google_cloud_vision(image_blobs: list[bytes]) -> str:
+    """Uses Google Cloud Vision API for visual OCR (supports handwriting and print).
+    Requires 'google-cloud-vision' to be installed and GOOGLE_APPLICATION_CREDENTIALS in .env.
+    """
+    import os
+    if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+        return ""
+    try:
+        from google.cloud import vision
+    except ImportError:
+        print("[gcv] google-cloud-vision library is not installed.")
+        return ""
+
+    print(f"[gcv] Sending {len(image_blobs)} pages to Google Cloud Vision API...")
+    try:
+        client = vision.ImageAnnotatorClient()
+        results = []
+        for idx, blob in enumerate(image_blobs):
+            image = vision.Image(content=blob)
+            response = client.document_text_detection(image=image)
+            text = response.full_text_annotation.text.strip() if response.full_text_annotation else ""
+            if text:
+                results.append(text)
+            if response.error.message:
+                print(f"[gcv] Error on page {idx+1}: {response.error.message}")
+        return "\n\n".join(results).strip()
+    except Exception as e:
+        print(f"[gcv] Failed to run Cloud Vision OCR: {e}")
+        return ""
+
+
+def _extract_question_paper_unified(raw: bytes, max_pages: int = 40, dpi: int = 110) -> str:
     """Vision OCR for a scanned QUESTION PAPER (no handwriting expected).
     Transcribes the full paper verbatim across all pages so we can build a rubric.
     """
     image_blobs = _render_pdf_to_pngs(raw, max_pages=max_pages, dpi=dpi)
     if not image_blobs:
         return ""
+
+    # Primary: Google Cloud Vision OCR if configured
+    gcv_text = _try_google_cloud_vision(image_blobs)
+    if gcv_text and len(gcv_text.strip()) >= 50:
+        print(f"[vision/qpaper] Google Cloud Vision OCR extracted {len(gcv_text)} chars")
+        return gcv_text
+
     prompt = _QUESTION_PAPER_PROMPT_TEMPLATE.format(n=len(image_blobs))
 
     try:
@@ -368,9 +436,9 @@ def _extract_question_paper_unified(raw: bytes, max_pages: int = 16, dpi: int = 
             print(f"[vision/qpaper] Gemini extracted {len(result)} chars")
             return result
     except QuotaExceeded:
-        print("[vision/qpaper] Gemini quota exhausted — falling back to Groq")
+        print("[vision/qpaper] Gemini quota exhausted - falling back to Groq")
     except Exception as e:
-        print(f"[vision/qpaper] Gemini failed ({e}) — falling back to Groq")
+        print(f"[vision/qpaper] Gemini failed ({e}) - falling back to Groq")
 
     try:
         result = _try_groq_chunked(image_blobs, prompt)
@@ -384,40 +452,68 @@ def _extract_question_paper_unified(raw: bytes, max_pages: int = 16, dpi: int = 
     return ""
 
 
-def _extract_solved_paper_unified(raw: bytes, max_pages: int = 16, dpi: int = 150) -> str:
+
+def _extract_solved_paper_unified(raw: bytes, max_pages: int = 40, dpi: int = 110) -> str:
     """Multi-image Vision OCR for solved papers. Tries Gemini first; if Gemini's
     daily quota is exhausted, falls back to Groq Llama 4 Scout (in chunks of 5).
     """
     image_blobs = _render_pdf_to_pngs(raw, max_pages=max_pages, dpi=dpi)
     if not image_blobs:
         return ""
+
+    # Primary: Google Cloud Vision OCR if configured
+    gcv_text = _try_google_cloud_vision(image_blobs)
+    if gcv_text and len(gcv_text.strip()) >= 50:
+        print(f"[vision] Google Cloud Vision OCR extracted {len(gcv_text)} chars")
+        return gcv_text
+
     prompt = _SOLVED_PAPER_PROMPT_TEMPLATE.format(n=len(image_blobs))
 
     # Primary: Gemini unified call
     try:
         result = _try_gemini_unified(image_blobs, prompt)
-        if result and "Answer:" in result:
+        if result and len(result.strip()) > 100:
             print(f"[vision] Gemini extracted result ({len(result)} chars)")
             return result
     except QuotaExceeded:
-        print("[vision] Gemini quota exhausted — falling back to Groq Llama 4 Scout vision")
+        print("[vision] Gemini quota exhausted - falling back to Groq Llama 4 Scout vision")
     except Exception as e:
-        print(f"[vision] Gemini failed ({e}) — falling back to Groq")
+        print(f"[vision] Gemini failed ({e}) - falling back to Groq")
 
     # Fallback: Groq Llama 4 Scout vision
     try:
         result = _try_groq_chunked(image_blobs, prompt)
-        if result and "Answer:" in result:
+        if result and len(result.strip()) > 100:
             print(f"[vision] Groq fallback extracted result ({len(result)} chars)")
-            return result
-        elif result:
-            print(f"[vision] Groq returned {len(result)} chars but no 'Answer:' lines")
             return result
     except Exception as e:
         print(f"[vision] Groq fallback also failed: {e}")
         raise RuntimeError(f"Both Gemini and Groq vision failed. Last error: {e}")
 
     return ""
+
+def _de_space_text(text: str) -> str:
+    """If the text has spaces between almost every letter (kerning/extraction glitch),
+    merges characters separated by single spaces while keeping multiple spaces
+    as word boundaries. Supports Indic and Latin scripts."""
+    if not text:
+        return text
+    words = text.split()
+    if not words:
+        return text
+    # Check average length of first 50 words to avoid scanning huge texts
+    sample_words = words[:50]
+    avg_len = sum(len(w) for w in sample_words) / len(sample_words)
+    if avg_len < 2.0:
+        lines = text.splitlines()
+        new_lines = []
+        for line in lines:
+            parts = _re.split(r'\s{2,}', line)
+            new_parts = [p.replace(' ', '') for p in parts]
+            new_lines.append(' '.join(new_parts))
+        return '\n'.join(new_lines)
+    return text
+
 
 def looks_like_question_paper(text: str) -> tuple[bool, str]:
     """Heuristic: does this look like a question paper (no student answers)?
@@ -430,7 +526,7 @@ def looks_like_question_paper(text: str) -> tuple[bool, str]:
     if not text or len(text.strip()) < 30:
         return True, "Empty or near-empty file"
 
-    t = text
+    t = _de_space_text(text)
 
     # 🟢 STRONG COUNTER-SIGNAL: structured 'Answer:' lines with real content =
     # this is an answer sheet (often Vision-extracted from a solved paper),
@@ -476,6 +572,12 @@ def looks_like_question_paper(text: str) -> tuple[bool, str]:
         return True, (f"{q_count} question markers with only ~{int(avg_body_len)} chars per question. "
                       "No real answer content found.")
 
+    # Check normalized text version (no spaces at all) for spacing-corrupted English terms
+    norm = _re.sub(r'\s+', '', text).lower()
+    for kw in ['maximummarks', 'timeallowed', 'generalinstruction', 'attemptallquestion']:
+        if kw in norm:
+            return True, f"Found normalized exam phrase: {kw}"
+
     return False, ""
 
 def _read_pdf_text_fast(raw: bytes) -> str:
@@ -485,6 +587,7 @@ def _read_pdf_text_fast(raw: bytes) -> str:
         reader = PdfReader(io.BytesIO(raw))
         pages = [p.extract_text() or "" for p in reader.pages]
         text = "\n".join(pages).strip()
+        text = _de_space_text(text)
         if len(text) > _MAX_ANSWER_CHARS:
             text = text[:_MAX_ANSWER_CHARS] + f"\n\n[truncated]"
         return text
@@ -492,13 +595,18 @@ def _read_pdf_text_fast(raw: bytes) -> str:
         return f"[pdf extract failed: {e}]"
 
 
-def _read_sheet(name: str, raw: bytes) -> str:
+def _read_sheet_impl(name: str, raw: bytes) -> str:
     lower = name.lower()
     if lower.endswith(".pdf"):
         try:
             reader = PdfReader(io.BytesIO(raw))
             pages = [p.extract_text() or "" for p in reader.pages]
             text = "\n".join(pages).strip()
+            text = _de_space_text(text)
+
+            # Check for PUA corruption (Indic character encoding errors)
+            pua_count = sum(1 for c in text if 0xE000 <= ord(c) <= 0xF8FF or 0xF0000 <= ord(c) <= 0xFFFFD or 0x100000 <= ord(c) <= 0x10FFFD)
+            has_pua_corruption = len(text) > 0 and (pua_count / len(text) > 0.05)
 
             # 🔍 If the pypdf text looks like a question paper (printed-only), the
             # PDF may actually be a SOLVED paper with handwritten answers that
@@ -506,14 +614,12 @@ def _read_sheet(name: str, raw: bytes) -> str:
             # faster than per-page AND better cross-page Q/A matching.
             is_paper, paper_reason = looks_like_question_paper(text)
 
-            # ALWAYS run Vision OCR on question-paper-looking PDFs. The user wants
-            # handwriting detection even on PDFs that look "digital" — a teacher may
-            # have annotated the PDF with student answers using Adobe/Foxit, and those
-            # annotations only appear when we render pages to images and Vision-OCR them.
-            if is_paper and len(reader.pages) > 0:
+            # ALWAYS run Vision OCR on question-paper-looking or corrupted PDFs.
+            if (is_paper or has_pua_corruption) and len(reader.pages) > 0:
                 avg_per_page = len(text.strip()) / max(1, len(reader.pages))
+                reason = "PUA encoding corruption" if has_pua_corruption else "question paper heuristic match"
                 print(f"[_read_sheet] '{name}': pypdf yield {avg_per_page:.0f} chars/page. "
-                      f"Running Vision OCR across {min(len(reader.pages), 16)} pages to "
+                      f"Running Vision OCR (reason: {reason}) across {min(len(reader.pages), 40)} pages to "
                       "scan for any handwritten/annotated student answers…")
                 try:
                     vision_text = _extract_solved_paper_unified(raw)
@@ -522,7 +628,7 @@ def _read_sheet(name: str, raw: bytes) -> str:
                         non_blank = len(_re.findall(
                             r"Answer\s*:\s*(?!\s*\[BLANK\])[^\n]+", vision_text, _re.IGNORECASE))
                     print(f"[_read_sheet] '{name}': Vision extracted {non_blank} non-blank answers")
-                    if non_blank >= 1:
+                    if non_blank >= 1 or (vision_text and len(vision_text.strip()) > 100):
                         if len(vision_text) > _MAX_ANSWER_CHARS:
                             vision_text = vision_text[:_MAX_ANSWER_CHARS] + "\n\n[truncated]"
                         return vision_text
@@ -530,7 +636,7 @@ def _read_sheet(name: str, raw: bytes) -> str:
                     # question paper, not a solved sheet. Surface a clear rejection.
                     return (f"[question_paper_only] This PDF appears to be the question paper itself "
                             f"with NO handwritten student answers. Vision OCR scanned "
-                            f"{min(len(reader.pages), 16)} pages and found 0 handwritten answers. "
+                            f"{min(len(reader.pages), 40)} pages and found 0 handwritten answers. "
                             "If you wanted to AUTO-GENERATE a rubric from this question paper, "
                             "use the '📑 Upload question paper' tab in Step 1 instead. "
                             "If this IS a solved paper, the handwriting may be too faint — "
@@ -557,6 +663,37 @@ def _read_sheet(name: str, raw: bytes) -> str:
         return raw.decode("utf-8", errors="replace").strip()
     except Exception:
         return ""
+
+
+def _read_sheet(name: str, raw: bytes) -> str:
+    import hashlib
+    file_hash = hashlib.sha256(raw).hexdigest()
+    cache_dir = os.path.join(os.path.dirname(__file__), "data", "ocr_cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, f"{file_hash}.md")
+
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                text = f.read().strip()
+            if text:
+                print(f"[ocr_cache] Cache HIT for file '{name}' (Hash: {file_hash[:10]})")
+                return text
+        except Exception as e:
+            print(f"[ocr_cache] Failed to read cache: {e}")
+
+    text = _read_sheet_impl(name, raw)
+
+    # Cache successful extractions (skip errors)
+    if text and not text.startswith(("[question_paper_only]", "[vision_failed]", "[pdf extract failed]", "[ocr failed]")):
+        try:
+            with open(cache_path, "w", encoding="utf-8") as f:
+                f.write(text)
+            print(f"[ocr_cache] Cached new transcript for file '{name}' (Hash: {file_hash[:10]})")
+        except Exception as e:
+            print(f"[ocr_cache] Failed to write cache: {e}")
+
+    return text
 
 
 def pre_flight_check(text: str, filename: str, rubric: str) -> dict[str, Any]:
@@ -624,181 +761,203 @@ def pre_flight_check(text: str, filename: str, rubric: str) -> dict[str, Any]:
     return {"errors": errors, "warnings": warnings, "info": info}
 
 
+def _make_fallback_result(filename: str, error_msg: str, answer_text: str,
+                          grade_level: int, subject: str, chapter: str,
+                          rubric: str, exam_config: dict = None, checks: dict = None) -> dict[str, Any]:
+    print(f"[grade] AutoGrader fallback applied for {filename}: {error_msg}")
+    rubric_total = _sum_rubric_marks(rubric) or 80
+    return {
+        "file": filename,
+        "ok": True,
+        "student_name": f"Student ({filename})",
+        "detected_language": "English",
+        "detected_scope": {"grade": grade_level, "subject": subject, "chapter": chapter},
+        "marks_awarded": 0,
+        "marks_total": rubric_total,
+        "percentage": 0.0,
+        "answer_formats_used": ["text"],
+        "per_question": [
+            {
+                "q": "Q1",
+                "marks_awarded": 0,
+                "marks_total": rubric_total,
+                "feedback": f"Auto-grading fallback applied. Error: {error_msg}. Raw transcribed answers: {answer_text[:200] or 'No transcription available'}...",
+                "format": "text"
+            }
+        ],
+        "mistakes": [
+            {"type": "conceptual", "description": f"Pipeline fallback: {error_msg}"}
+        ],
+        "strengths": ["Attempted paper"],
+        "suggestion": f"Manual grading required. Pipeline error: {error_msg}",
+        "ai_cheat_suspicion": 0,
+        "extracted_text": answer_text,
+        "grade_used": grade_level,
+        "subject_used": subject,
+        "chapter_used": chapter,
+        "grade_tier": build_tier_label(grade_level),
+        "exam_config_used": exam_config,
+        "pre_flight": checks or {"errors": [], "warnings": [], "info": []},
+        "verifier": {"agrees": True, "comment": "Verifier skipped due to fallback"},
+        "study_plan": ["Review the topic manually"]
+    }
+
+
 async def _grade_one(filename: str, raw: bytes, rubric: str, verify: bool,
                      declared_total: int = 0, do_ncert_check: bool = False,
                      do_study_plan: bool = False,
                      grade_override: int = 0, subject_override: str = "",
                      exam_config: dict = None) -> dict[str, Any]:
-    # ── Step 1: OCR (biggest variable cost) ──────────────────────────────────
-    answer_text = await asyncio.to_thread(_read_sheet, filename, raw)
-
-    extraction_hint = ""
-    if not answer_text or (answer_text.startswith("[") and answer_text.startswith(
-            ("[question_paper_only]", "[vision_failed]", "[pdf extract failed]",
-             "[ocr failed]"))):
-        if not answer_text:
-            return {"file": filename, "ok": False, "rejected_code": "empty_file",
-                    "error": "File appears to be empty", "extracted_text": ""}
-        if answer_text.startswith("[question_paper_only]"):
-            extraction_hint = ("⚠ No handwritten answers detected — grading printed text only.")
-            try:
-                reader = PdfReader(io.BytesIO(raw))
-                answer_text = "\n".join((p.extract_text() or "") for p in reader.pages).strip()
-            except Exception:
-                answer_text = ""
-        elif answer_text.startswith("[vision_failed]"):
-            return {"file": filename, "ok": False, "rejected_code": "vision_failed",
-                    "error": answer_text[len("[vision_failed] "):], "extracted_text": ""}
-        else:
-            return {"file": filename, "ok": False, "rejected_code": "extract_failed",
-                    "error": answer_text, "extracted_text": ""}
-
-    checks = pre_flight_check(answer_text, filename, rubric)
-
-    # ── Step 2: Scope from rubric keywords + answer sheet header — zero LLM calls
-    scope = _fast_scope(rubric, answer_text)
-    if grade_override > 0:
-        scope["grade"] = grade_override
-    if subject_override:
-        scope["subject"] = subject_override
-    grade_level = scope["grade"]
-    subject     = scope["subject"]
-    chapter     = scope["chapter"]
-
-    # ── Step 3: NCERT context — local RAG only, no network fetch ────────────
-    ctx = ""
-    try:
-        if subject != "General":
-            from ncert_rag import rag_retrieve
-            ctx = rag_retrieve(chapter or subject, grade_level, subject, top_k=2) or ""
-            if not ctx:
-                ctx = retrieve_context(chapter or subject, grade_level, subject, top_k=2) or ""
-    except Exception as e:
-        print(f"[grade] NCERT RAG failed: {e}")
-
-    system_prompt = bulk_grader_prompt(grade_level, subject, chapter, rubric, ctx,
-                                       exam_config=exam_config)
-
-    # ── Step 4: Grade ────────────────────────────────────────────────────────
-    try:
-        result = await asyncio.to_thread(grade_text, system_prompt, answer_text)
-
-        # Let the grader's own scope inference win (it sees both rubric + answer)
-        inferred = result.get("detected_scope") or {}
-        if inferred.get("grade"):
-            scope.update({k: inferred[k] for k in ("grade", "subject", "chapter") if k in inferred})
-            grade_level = scope["grade"]; subject = scope["subject"]; chapter = scope["chapter"]
-        result["detected_scope"] = scope
-
-        # ── Marks recalculation ───────────────────────────────────────────────
-        pq = result.get("per_question") or []
-        rubric_total = _sum_rubric_marks(rubric)
-        if pq:
-            computed_total   = sum(int(q.get("marks_total",   0) or 0) for q in pq)
-            computed_awarded = sum(int(q.get("marks_awarded", 0) or 0) for q in pq)
-            if computed_total > 0 or rubric_total > 0:
-                if declared_total > 0:      final_total = declared_total
-                elif rubric_total > 0:      final_total = rubric_total
-                else:                       final_total = computed_total
-                final_awarded = min(computed_awarded, final_total)
-                result["marks_total"]   = final_total
-                result["marks_awarded"] = final_awarded
-                result["percentage"]    = round(final_awarded / final_total * 100, 1)
-
-        # ── Math verifier (instant, no LLM) ──────────────────────────────────
-        try:
-            result["math_check"] = verify_math(answer_text)
-        except Exception:
-            pass
-
-        # ── Step 5: Optional post-tasks — all run in parallel ────────────────
-        post_tasks: list[tuple[str, Any]] = []
-        if verify:
-            post_tasks.append(("verifier",
-                asyncio.create_task(asyncio.to_thread(verify_grade, answer_text, rubric, result))))
-        if do_ncert_check:
-            ncert_sys = ncert_validate_prompt(grade_level, subject, chapter)
-            post_tasks.append(("ncert_check",
-                asyncio.create_task(asyncio.to_thread(
-                    ncert_validate, answer_text, grade_level, subject, chapter, ncert_sys))))
-        pct = result.get("percentage", 100)
-        if do_study_plan and result.get("mistakes") and pct < 80:
-            post_tasks.append(("study_plan",
-                asyncio.create_task(asyncio.to_thread(
-                    make_study_plan, result, grade_level, subject, chapter))))
-
-        for name, task in post_tasks:
-            try:
-                out = await task
-                if name == "verifier":
-                    result["verifier"] = out
-                    if not out.get("agrees", True) and "suggested_marks" in out:
-                        result["needs_review"] = True
-                elif name == "study_plan":
-                    result["study_plan"] = out
-                elif name == "ncert_check":
-                    result["ncert_check"] = out
-            except Exception as e:
-                if name == "verifier":
-                    result["verifier"] = {"agrees": True, "comment": f"verifier failed: {e}"}
-
-        polish_feedback_dict(result, grade_level)
-        out = {"file": filename, "ok": True, "extracted_text": answer_text,
-               "grade_used": grade_level, "subject_used": subject, "chapter_used": chapter,
-               "grade_tier": build_tier_label(grade_level),
-               "exam_config_used": exam_config,
-               "pre_flight": checks, **result}
-        if extraction_hint:
-            out["extraction_hint"] = extraction_hint
-        if ctx:
-            out["ncert_context_used"] = True
-        return out
-    except Exception as e:
-        return {"file": filename, "ok": False, "error": str(e),
-                "extracted_text": answer_text}
+    from grading_graph import grading_graph
+    
+    inputs = {
+        "filename": filename,
+        "raw_bytes": raw,
+        "rubric": rubric,
+        "verify": verify,
+        "declared_total": declared_total,
+        "do_ncert_check": do_ncert_check,
+        "do_study_plan": do_study_plan,
+        "grade_override": grade_override,
+        "subject_override": subject_override,
+        "exam_config": exam_config,
+    }
+    
+    final_state = await grading_graph.ainvoke(inputs)
+    return final_state["final_output"]
 
 
 @app.post("/api/grade/bulk")
 async def grade_bulk(
     rubric:           str  = Form(...),
-    verify:           bool = Form(False),
-    total_marks:      int  = Form(0),
-    ncert_check:      bool = Form(False),
-    study_plan:       bool = Form(False),
-    grade_override:   int  = Form(0),
+    verify:           Any  = Form(False),
+    total_marks:      Any  = Form(0),
+    ncert_check:      Any  = Form(False),
+    study_plan:       Any  = Form(False),
+    grade_override:   Any  = Form(None),
     subject_override: str  = Form(""),
     exam_config:      str  = Form(""),
-    exam_config_id:   int  = Form(0),
+    exam_config_id:   Any  = Form(None),
+    session_id:       str  = Form(None),
     files:            list[UploadFile] = File(...),
 ):
-    """Grade many answer sheets. AI auto-detects grade/subject/chapter per sheet —
-    the teacher just provides a rubric and the files."""
+    """Grade many answer sheets. Grade and subject must be manually selected by the teacher."""
     import json as _json
     if not files: raise HTTPException(400, "No files uploaded")
     if not rubric.strip(): raise HTTPException(400, "Rubric is required")
 
+    # Safe parsing helpers
+    def _bool(val) -> bool:
+        if val is None: return False
+        if isinstance(val, bool): return val
+        return str(val).lower() in ("true", "1", "yes")
+
+    def _int(val) -> int:
+        if val is None or val == "": return 0
+        try: return int(float(val))
+        except Exception: return 0
+
+    parsed_verify = _bool(verify)
+    parsed_ncert = _bool(ncert_check)
+    parsed_study_plan = _bool(study_plan)
     # Resolve exam config: inline JSON > saved DB record > none
     resolved_config = None
     if exam_config:
         try: resolved_config = _json.loads(exam_config)
         except Exception: pass
     elif exam_config_id:
-        resolved_config = exam_config_store.get_config(exam_config_id)
+        parsed_config_id = _int(exam_config_id)
+        if parsed_config_id:
+            resolved_config = exam_config_store.get_config(parsed_config_id)
+
+    parsed_total_marks = _int(total_marks) or _int((resolved_config or {}).get("paper_total"))
 
     # Prefer grade/subject from exam config if not overridden by form fields
-    eff_grade   = grade_override   or (resolved_config or {}).get("grade", 0)
-    eff_subject = subject_override or (resolved_config or {}).get("subject", "")
+    eff_grade   = _int(grade_override) or _int((resolved_config or {}).get("grade"))
+    eff_subject = subject_override or (resolved_config or {}).get("subject")
 
-    sem = asyncio.Semaphore(8)
+    if not eff_grade:
+        raise HTTPException(400, "Class / Grade must be manually selected by the teacher.")
+    if not eff_subject or not str(eff_subject).strip():
+        raise HTTPException(400, "Subject must be manually selected by the teacher.")
+
+    if session_id:
+        GRADING_PROGRESS[session_id] = {
+            "total": len(files),
+            "completed": 0,
+            "failed": 0,
+            "files": {f.filename or "untitled": "queued" for f in files}
+        }
+        if len(GRADING_PROGRESS) > 100:
+            GRADING_PROGRESS.popitem(last=False)
+
+    sem = asyncio.Semaphore(3)
     async def bounded(f: UploadFile):
+        filename = f.filename or "untitled"
+        if session_id and session_id in GRADING_PROGRESS:
+            GRADING_PROGRESS[session_id]["files"][filename] = "grading"
         async with sem:
-            raw = await f.read()
-            return await _grade_one(f.filename or "untitled", raw, rubric, verify,
-                                    total_marks, do_ncert_check=ncert_check,
-                                    do_study_plan=study_plan,
-                                    grade_override=eff_grade,
-                                    subject_override=eff_subject,
-                                    exam_config=resolved_config)
+            filename_lower = filename.lower()
+            import re
+            _MS_KEYWORDS = re.compile(
+                r"[-_](ms|marking|solution|key|rubric|scheme)\b"
+                r"|\b(answer[-_]key|solution[-_]key|marking[-_]scheme|question[-_]paper)\b",
+                re.IGNORECASE
+            )
+            if _MS_KEYWORDS.search(filename_lower):
+                if session_id and session_id in GRADING_PROGRESS:
+                    GRADING_PROGRESS[session_id]["files"][filename] = "skipped"
+                    GRADING_PROGRESS[session_id]["completed"] += 1
+                return {
+                    "file": filename,
+                    "ok": False,
+                    "error": "Skipped: This file appears to be a marking scheme, answer key, or question paper.",
+                    "student_name": "Skipped (Answer Key)",
+                    "marks_awarded": 0,
+                    "marks_total": parsed_total_marks or 80,
+                    "percentage": 0,
+                    "per_question": [],
+                    "mistakes": [],
+                    "strengths": [],
+                    "suggestion": f"Ignored file '{filename}' because its name matches marking scheme patterns.",
+                    "grade_used": eff_grade,
+                    "subject_used": eff_subject,
+                    "chapter_used": "",
+                    "extracted_text": "[skipped]"
+                }
+            try:
+                raw = await f.read()
+                res = await _grade_one(filename, raw, rubric, parsed_verify,
+                                        parsed_total_marks, do_ncert_check=parsed_ncert,
+                                        do_study_plan=parsed_study_plan,
+                                        grade_override=eff_grade,
+                                        subject_override=eff_subject,
+                                        exam_config=resolved_config)
+                if session_id and session_id in GRADING_PROGRESS:
+                    GRADING_PROGRESS[session_id]["files"][filename] = "completed"
+                    GRADING_PROGRESS[session_id]["completed"] += 1
+                return res
+            except Exception as e:
+                if session_id and session_id in GRADING_PROGRESS:
+                    GRADING_PROGRESS[session_id]["files"][filename] = "failed"
+                    GRADING_PROGRESS[session_id]["failed"] += 1
+                return {
+                    "file": filename,
+                    "ok": False,
+                    "error": f"Error: {e}",
+                    "student_name": "Error",
+                    "marks_awarded": 0,
+                    "marks_total": parsed_total_marks or 80,
+                    "percentage": 0,
+                    "per_question": [],
+                    "mistakes": [],
+                    "strengths": [],
+                    "suggestion": f"Failed during grading: {e}",
+                    "grade_used": eff_grade,
+                    "subject_used": eff_subject,
+                    "chapter_used": "",
+                    "extracted_text": ""
+                }
 
     results = await asyncio.gather(*(bounded(f) for f in files))
     graded = [r for r in results if r.get("ok")]
@@ -870,59 +1029,155 @@ async def export_csv(payload: dict):
 
 
 # ─── Auto-generate rubric from a question paper ─────────────────────────────
-@app.post("/api/rubric/from-paper")
-async def rubric_from_paper(paper: UploadFile = File(...)):
-    """Teacher uploads a question paper (PDF / image / txt). Backend extracts
-    the text, then asks Groq to produce a marking rubric. Returns:
-        { rubric: str, questions_found: int, total_marks: int, extracted_text: str }
-    """
-    raw = await paper.read()
-    if not raw:
-        raise HTTPException(400, "Empty file")
-
-    name_l = (paper.filename or "").lower()
+async def _extract_doc_text_impl(filename: str, raw: bytes) -> str:
+    name_l = filename.lower()
     if name_l.endswith(".pdf"):
-        # Try pypdf first (fast for text-layer PDFs)
         text = await asyncio.to_thread(_read_pdf_text_fast, raw)
-        # If pypdf yielded too little — scanned PDF with no text layer — Vision OCR all pages
-        if not text or text.startswith("[") or len(text.strip()) < 200:
-            print(f"[rubric/from-paper] pypdf yielded {len(text.strip()) if text else 0} chars — "
-                  f"falling back to unified Vision OCR for scanned PDF")
+        
+        # Check for PUA corruption or loose/corrupted Hindi matras
+        pua_count = sum(1 for c in text if 0xE000 <= ord(c) <= 0xF8FF or 0xF0000 <= ord(c) <= 0xFFFFD or 0x100000 <= ord(c) <= 0x10FFFD)
+        matras = set("ािीुूृेैोौ")
+        loose_matras = sum(1 for idx, c in enumerate(text) if c in matras and (idx == 0 or text[idx-1] in " \n\t" or idx == len(text)-1 or text[idx+1] in " \n\t"))
+        has_pua_corruption = len(text) > 0 and (pua_count / len(text) > 0.05)
+        has_hindi_corruption = loose_matras > 5
+
+        if not text or text.startswith("[") or len(text.strip()) < 200 or has_pua_corruption or has_hindi_corruption:
+            if has_pua_corruption or has_hindi_corruption:
+                reason = "PUA encoding corruption" if has_pua_corruption else f"corrupted Hindi matras ({loose_matras} standalone matras)"
+                print(f"[extract_doc_text] '{filename}' text extraction corrupted ({reason}). Falling back to Vision OCR...")
             try:
                 vision_text = await asyncio.to_thread(
-                    _extract_question_paper_unified, raw, 30, 200,
+                    _extract_question_paper_unified, raw, 15, 120,
                 )
                 if vision_text and len(vision_text.strip()) >= 50:
-                    text = vision_text
+                    return vision_text
             except Exception as e:
-                print(f"[rubric/from-paper] Vision OCR fallback failed: {e}")
-    else:
-        # Image or txt — go through full _read_sheet (uses Gemini OCR for images)
-        text = await asyncio.to_thread(_read_sheet, paper.filename or "paper", raw)
+                print(f"[extract_doc_text] Vision OCR failed: {e}")
+        return text
+    elif name_l.endswith((".png", ".jpg", ".jpeg", ".webp")):
+        mime = "image/png" if name_l.endswith(".png") else "image/jpeg"
+        try:
+            return await asyncio.to_thread(gemini_ocr, raw, mime=mime)
+        except Exception as e:
+            print(f"[extract_doc_text] OCR failed: {e}")
+            return ""
+    try:
+        return raw.decode("utf-8", errors="replace").strip()
+    except Exception:
+        return ""
 
-    if not text or text.startswith("["):
-        raise HTTPException(400, f"Could not read question paper: {text or 'no text extracted'}")
-    if len(text.strip()) < 30:
-        raise HTTPException(400, "Too little text extracted — paper may be too low resolution.")
+
+async def _extract_doc_text(filename: str, raw: bytes) -> str:
+    import hashlib
+    file_hash = hashlib.sha256(raw).hexdigest()
+    cache_dir = os.path.join(os.path.dirname(__file__), "data", "ocr_cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, f"{file_hash}.md")
+
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                text = f.read().strip()
+            if text:
+                print(f"[ocr_cache/doc] Cache HIT for doc '{filename}' (Hash: {file_hash[:10]})")
+                return text
+        except Exception as e:
+            print(f"[ocr_cache/doc] Failed to read cache: {e}")
+
+    text = await _extract_doc_text_impl(filename, raw)
+
+    # Cache successful extractions (skip errors)
+    if text and not text.startswith(("[pdf extract failed]", "[ocr failed]", "[vision_failed]")):
+        try:
+            with open(cache_path, "w", encoding="utf-8") as f:
+                f.write(text)
+            print(f"[ocr_cache/doc] Cached new transcript for doc '{filename}' (Hash: {file_hash[:10]})")
+        except Exception as e:
+            print(f"[ocr_cache/doc] Failed to write cache: {e}")
+
+    return text
+
+
+@app.post("/api/rubric/from-paper")
+async def rubric_from_paper(
+    paper: UploadFile = File(...),
+    solution: UploadFile | None = File(None),
+):
+    """Teacher uploads a question paper (PDF / image / txt) and solution sheet.
+    Backend extracts the text, then asks Groq/Gemini to produce a marking rubric. Returns:
+        { rubric: str, questions_found: int, total_marks: int, extracted_text: str }
+    """
+    raw_paper = await paper.read()
+    if not raw_paper:
+        raise HTTPException(400, "Empty question paper file")
+
+    if not solution:
+        raise HTTPException(400, "Please upload the Answer Key / Solution Key alongside the Question Paper to generate the grading rubric.")
+
+    raw_sol = await solution.read()
+    if not raw_sol:
+        raise HTTPException(400, "Please upload the Answer Key / Solution Key alongside the Question Paper to generate the grading rubric.")
+
+    paper_text = await _extract_doc_text(paper.filename or "paper", raw_paper)
+    if not paper_text or paper_text.startswith("["):
+        raise HTTPException(400, f"Could not read question paper: {paper_text or 'no text extracted'}")
+    if len(paper_text.strip()) < 30:
+        raise HTTPException(400, "Too little text extracted from question paper — paper may be too low resolution.")
+
+    solution_text = await _extract_doc_text(solution.filename or "solution", raw_sol)
+    if not solution_text or solution_text.startswith("["):
+        raise HTTPException(400, f"Could not read solution key: {solution_text or 'no text extracted'}")
+    if len(solution_text.strip()) < 30:
+        raise HTTPException(400, "Too little text extracted from solution key — key may be too low resolution.")
 
     try:
-        result = await asyncio.to_thread(generate_rubric_from_questions, text)
+        result = await asyncio.to_thread(generate_rubric_from_questions, paper_text, solution_text)
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(500, f"Rubric generation failed: {e}")
-    result["extracted_text"] = text[:2000]
+
+    # ── CRITICAL FIX ──────────────────────────────────────────────────────────
+    # If the AI returned an empty rubric, raise a clear error instead of sending
+    # back an empty string. Without this the frontend would grade with no rubric
+    # and the AI would invent its own marks/responses from scratch.
+    rubric_text = (result.get("rubric") or "").strip()
+    if not rubric_text:
+        raise HTTPException(
+            422,
+            "Question paper was read successfully but no questions with marks could be "
+            "extracted. Make sure the file is a CBSE question paper with question numbers "
+            f"and mark allocations (e.g. Q1 [5 marks]). Extracted text preview: "
+            f"{paper_text[:300]!r}"
+        )
+    # ──────────────────────────────────────────────────────────────────────────
+
+    result["extracted_text"] = paper_text[:2000]
+    result["solution_text"] = solution_text
     return result
 
 
 @app.post("/api/feedback/pdf")
 async def feedback_pdf(payload: dict):
+    import urllib.parse
     result = payload.get("result") or {}
     meta   = payload.get("meta") or {}
     if not result: raise HTTPException(400, "Missing 'result'")
     pdf = await asyncio.to_thread(build_feedback_pdf, result, meta)
     student = result.get("student_name") or meta.get("file", "student")
-    safe = "".join(c for c in student if c.isalnum() or c in " _-").strip() or "student"
-    return StreamingResponse(iter([pdf]), media_type="application/pdf",
-                             headers={"Content-Disposition": f'attachment; filename="{safe}.pdf"'})
+    
+    # Filter non-printable/control chars first
+    cleaned_student = "".join(c for c in student if c.isprintable())
+    safe = "".join(c for c in cleaned_student if c.isalnum() or c in " _-").strip() or "student"
+    
+    # Strictly ASCII safe name for fallback
+    ascii_safe = "".join(c for c in safe if ord(c) < 128).strip() or "student"
+    encoded_safe = urllib.parse.quote(safe)
+    
+    headers = {
+        "Content-Disposition": f'attachment; filename="{ascii_safe}.pdf"; filename*=UTF-8\'\'{encoded_safe}.pdf'
+    }
+    return StreamingResponse(iter([pdf]), media_type="application/pdf", headers=headers)
 
 
 @app.post("/api/feedback/zip")
@@ -938,7 +1193,8 @@ async def feedback_zip(payload: dict):
             try:
                 pdf = await asyncio.to_thread(build_feedback_pdf, r, file_meta)
                 student = r.get("student_name") or r.get("file", f"student_{i}")
-                safe = "".join(c for c in student if c.isalnum() or c in " _-").strip() or f"student_{i}"
+                cleaned_student = "".join(c for c in student if c.isprintable())
+                safe = "".join(c for c in cleaned_student if c.isalnum() or c in " _-").strip() or f"student_{i}"
                 zf.writestr(f"{safe}.pdf", pdf)
             except Exception as e:
                 zf.writestr(f"_error_{i}.txt", f"Failed to build PDF: {e}")
@@ -997,7 +1253,7 @@ def history_clear():
 
 class RubricIn(BaseModel):
     name: str
-    grade: int
+    grade: Any
     subject: str
     chapter: str = ""
     rubric: str
@@ -1047,7 +1303,7 @@ async def agent_chat(payload: ChatPayload):
 
 class PracticePayload(BaseModel):
     result:    dict
-    grade:     int  = 8
+    grade:     Any  = 8
     subject:   str  = "General"
     chapter:   str  = ""
     count:     int  = 5
@@ -1079,3 +1335,10 @@ async def agent_class_plan(payload: ClassPlanPayload):
         return plan
     except Exception as e:
         raise HTTPException(500, f"Class plan generation failed: {e}")
+
+
+@app.get("/api/curriculum/{grade}")
+def get_curriculum(grade: int):
+    grade_key = cbse_kb._grade_key(grade)
+    grade_data = cbse_kb.CBSE_KB.get(grade_key, {})
+    return {"subjects": grade_data}
