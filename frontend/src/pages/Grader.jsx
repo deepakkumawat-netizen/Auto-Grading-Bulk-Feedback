@@ -297,7 +297,7 @@ export default function Grader({ onHome }) {
 
   const missingGroq = health && !health.groq_configured
   const report = bulk.data
-  const canSubmit = !bulk.loading && files.length > 0 && rubric.trim()
+  const canSubmit = !bulk.loading && files.length > 0 && rubric.trim() && examConfig.grade && examConfig.subject
   const flaggedCount = useMemo(
     () => report?.results?.filter(r => r.needs_review).length || 0,
     [report]
@@ -327,10 +327,9 @@ export default function Grader({ onHome }) {
 
       <main className="page">
         <div className="auto-detect-info">
-          <span className="ad-icon">🪄</span>
+          <span className="ad-icon">📌</span>
           <div>
-            <b>Grade &amp; subject are auto-detected from each answer sheet.</b> Use the
-            fields below to override when the paper has no grade/class printed on it.
+            <b>Class/Grade &amp; Subject selection:</b> Please manually select the Class/Grade and Subject below. Grade-appropriate strictness and feedback will be applied.
           </div>
         </div>
 
@@ -455,18 +454,20 @@ export default function Grader({ onHome }) {
             <div className="override-row">
               <div className="override-field">
                 <label className="override-label">
-                   Class / Grade
+                   Class / Grade *
                 </label>
                 <select className="total-marks-input" value={examConfig.grade || ""}
                         onChange={e => setExamConfig(prev => ({ ...prev, grade: parseInt(e.target.value) || "" }))}
                         disabled={bulk.loading}>
                   <option value="">Select Grade</option>
-                  <option value="10">Grade 10</option>
+                  {[1,2,3,4,5,6,7,8,9,10,11,12].map(g => (
+                    <option key={g} value={g}>Grade {g}</option>
+                  ))}
                 </select>
               </div>
               <div className="override-field">
                 <label className="override-label">
-                   Subject
+                   Subject *
                 </label>
                 <select className="total-marks-input" value={examConfig.subject || ""}
                         onChange={e => setExamConfig(prev => ({ ...prev, subject: e.target.value }))}

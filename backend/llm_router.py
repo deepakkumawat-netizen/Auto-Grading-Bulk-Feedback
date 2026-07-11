@@ -452,13 +452,13 @@ def generate_rubric_from_questions(question_paper_text: str, solution_key_text: 
 _RUBRIC_QUALITY_RULES = """\
 HOW TO WRITE THE RUBRIC LINES:
 =====================================================
-You MUST structure the rubric lines based on the questions and marks found in the Question Paper.
+You MUST structure the rubric lines based on the questions and marks found in the Question Paper and the teacher's official Solution Key / Answer Key.
 
 Rules:
 1. STRUCTURE FROM QUESTION PAPER: Formulate the list of questions, question numbers (e.g. Q1, Q2, Q3), and their mark allocations strictly from the Question Paper. Do NOT omit questions present in the Question Paper.
    - ⚠️ IMPORTANT: If a question has sub-parts (e.g. Question 1 has parts (i), (ii) or (a), (b)), you MUST prefix the sub-part with the parent question number. Write "Q1(i)" or "Q1(a)", NOT "Q(i)" or "Q(a)". Always maintain the correct question prefix.
-2. ANSWER KEY INTEGRATION: For each question, look up the correct answers, steps, and key points from the provided teacher's Solution Key / Answer Key. Do NOT invent your own correct answers.
-3. HANDLE MISSING OR REPETITIVE ANSWER KEY DETAILS: If the Solution Key / Answer Key contains repetitive generic text (like "व्याकरणिक विश्लेषण...") or is missing specific answers for a question, write a clear, specific marking rubric based on the actual question text from the Question Paper.
+2. ANSWER KEY INTEGRATION: For each question, look up the correct answers, steps, and key points from the provided teacher's Solution Key / Answer Key. Do NOT invent your own correct answers, and do not assume ideal answers.
+3. STRICT ADHERENCE: Use only the teacher's answer key as the grading reference. Do not generate or assume ideal answers. Never create your own answer format or invent rubric points. Follow only the teacher-provided answer key and marking instructions. If the Answer Key lacks details or contains placeholder text, you must still only grade against what is explicitly specified by the teacher.
 4. SPECIFICITY: Every rubric line MUST specify the exact question content (e.g., "Evaluate sin 60 cos 30 + sin 30 cos 60" or "Prove that 2 - sqrt(3) is irrational") and the step-by-step mark breakdown, not just generic guidelines.
 5. LANGUAGE CONSISTENCY: You MUST write the rubric description, questions, and marking criteria in the SAME language as the original question from the Question Paper. If a question is written in Hindi, the rubric description and marking criteria for that question MUST be written in Hindi. Do NOT translate Hindi questions or criteria to English.
 """
