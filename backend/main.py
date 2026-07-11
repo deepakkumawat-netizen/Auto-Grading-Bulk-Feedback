@@ -1042,7 +1042,7 @@ async def _extract_doc_text_impl(filename: str, raw: bytes) -> str:
         matras = set("ािीुूृेैोौ")
         loose_matras = sum(1 for idx, c in enumerate(text) if c in matras and (idx == 0 or text[idx-1] in " \n\t" or idx == len(text)-1 or text[idx+1] in " \n\t"))
         has_pua_corruption = len(text) > 0 and (pua_count / len(text) > 0.05)
-        has_hindi_corruption = loose_matras > 5
+        has_hindi_corruption = len(text) > 0 and (loose_matras / len(text) > 0.15)
 
         if not text or text.startswith("[") or len(text.strip()) < 200 or has_pua_corruption or has_hindi_corruption:
             if has_pua_corruption or has_hindi_corruption:
