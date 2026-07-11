@@ -715,7 +715,7 @@ def _generate_rubric_chunked(full_text: str, chunks: list[str], model: str, solu
         print(f"[rubric chunk {i+1}/{len(chunks)}] {len(lines)} Q lines, {part.get('chunk_marks')} marks")
         # Pace chunks so TPM window has time to clear between calls
         if i + 1 < len(chunks):
-            _time.sleep(20)
+            _time.sleep(2)
     out = {
         "rubric": "\n".join(all_lines),
         "questions_found": total_q,
@@ -883,7 +883,7 @@ def grade_text(system_prompt: str, student_answer: str) -> dict[str, Any]:
             
         # Pace calls to respect RPM/TPM limits
         if idx + 1 < len(chunks):
-            _time.sleep(10)
+            _time.sleep(2)
             
     # Merge results
     merged = {
