@@ -34,3 +34,7 @@ Thumbs.db
 # Misc
 *.swp
 *.tmp
+
+# Debug / Temporary Grader Output
+*failed_grader_response.json
+*failed_repaired_response.json
