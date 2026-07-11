@@ -460,9 +460,7 @@ export default function Grader({ onHome }) {
                         onChange={e => setExamConfig(prev => ({ ...prev, grade: parseInt(e.target.value) || "" }))}
                         disabled={bulk.loading}>
                   <option value="">Select Grade</option>
-                  {[1,2,3,4,5,6,7,8,9,10,11,12].map(g => (
-                    <option key={g} value={g}>Grade {g}</option>
-                  ))}
+                  <option value="10">Grade 10</option>
                 </select>
               </div>
               <div className="override-field">

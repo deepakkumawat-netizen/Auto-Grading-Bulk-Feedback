@@ -582,11 +582,13 @@ def looks_like_question_paper(text: str) -> tuple[bool, str]:
 
 def _read_pdf_text_fast(raw: bytes) -> str:
     """Pypdf-only PDF text extraction — fast, no Vision fallback.
+    Converts PDF into a Markdown format by dividing pages with headers.
     Used by /api/rubric/from-paper where we KNOW the input is a question paper."""
     try:
         reader = PdfReader(io.BytesIO(raw))
         pages = [p.extract_text() or "" for p in reader.pages]
-        text = "\n".join(pages).strip()
+        markdown_pages = [f"## Page {i + 1}\n\n{text.strip()}" for i, text in enumerate(pages) if text.strip()]
+        text = "\n\n".join(markdown_pages).strip()
         text = _de_space_text(text)
         if len(text) > _MAX_ANSWER_CHARS:
             text = text[:_MAX_ANSWER_CHARS] + f"\n\n[truncated]"
@@ -601,7 +603,8 @@ def _read_sheet_impl(name: str, raw: bytes) -> str:
         try:
             reader = PdfReader(io.BytesIO(raw))
             pages = [p.extract_text() or "" for p in reader.pages]
-            text = "\n".join(pages).strip()
+            markdown_pages = [f"## Page {i + 1}\n\n{text.strip()}" for i, text in enumerate(pages) if text.strip()]
+            text = "\n\n".join(markdown_pages).strip()
             text = _de_space_text(text)
 
             # Check for PUA corruption (Indic character encoding errors)
