@@ -286,24 +286,29 @@ def _extract_json(raw: str) -> dict[str, Any]:
     try:
         return json.loads(content)
     except Exception as e:
-        print(f"[_extract_json] standard JSON load failed: {e}. Attempting to repair quotes...")
-        repaired = ""
+        print(f"[_extract_json] standard JSON load failed: {e}. Attempting to repair with json_repair...")
         try:
-            repaired = _repair_json_quotes(content)
-            return json.loads(repaired)
-        except Exception as e2:
-            print(f"[_extract_json] JSON repair failed: {e2}")
-            # Save debug files
+            import json_repair
+            return json_repair.loads(content)
+        except Exception as e_repair:
+            print(f"[_extract_json] json_repair parse failed: {e_repair}. Falling back to manual quote repair...")
+            repaired = ""
             try:
-                with open("failed_grader_response.json", "w", encoding="utf-8") as f:
-                    f.write(content)
-                if repaired:
-                    with open("failed_repaired_response.json", "w", encoding="utf-8") as f:
-                        f.write(repaired)
-            except Exception as ef:
-                print(f"Failed to write debug files: {ef}")
-            # If repair fails, fall back to the original json.loads(content) to throw the clear error
-            return json.loads(content)
+                repaired = _repair_json_quotes(content)
+                return json.loads(repaired)
+            except Exception as e2:
+                print(f"[_extract_json] JSON repair failed: {e2}")
+                # Save debug files
+                try:
+                    with open("failed_grader_response.json", "w", encoding="utf-8") as f:
+                        f.write(content)
+                    if repaired:
+                        with open("failed_repaired_response.json", "w", encoding="utf-8") as f:
+                            f.write(repaired)
+                except Exception as ef:
+                    print(f"Failed to write debug files: {ef}")
+                # If repair fails, fall back to the original json.loads(content) to throw the clear error
+                return json.loads(content)
 
 
 _RUBRIC_CHUNK_CHARS = 2000  # ~500 tokens — keeps output bounded and fits comfortably in Groq TPM limits
