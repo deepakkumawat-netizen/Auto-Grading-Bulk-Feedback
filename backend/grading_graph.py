@@ -68,11 +68,22 @@ async def ocr_and_preflight_node(state: GradingState) -> Dict[str, Any]:
         images = [(raw, mime)]
 
     # ── OCR / Concurrent Transcription ──────────────────────────────────────
+    answer_text = ""
     if handwriting_audit and images:
         from llm_router import transcribe_all_pages_concurrently
         answer_text = await transcribe_all_pages_concurrently(images)
-    else:
-        answer_text = await asyncio.to_thread(_read_sheet, filename, raw)
+    
+    is_corrupted_transcription = (
+        not answer_text or 
+        "Transcription Error" in answer_text or 
+        len(answer_text.strip()) < 50
+    )
+    if not handwriting_audit or not images or is_corrupted_transcription:
+        native_text = await asyncio.to_thread(_read_sheet, filename, raw)
+        if native_text and not native_text.startswith("["):
+            answer_text = native_text
+        elif not answer_text:
+            answer_text = native_text or "[ocr failed]"
     
     extraction_hint = ""
     error = None
@@ -147,7 +158,19 @@ async def grade_node(state: GradingState) -> Dict[str, Any]:
     try:
         if handwriting_audit and images:
             from llm_router import grade_handwriting
-            result = await asyncio.to_thread(grade_handwriting, system_prompt, images)
+            try:
+                result = await asyncio.to_thread(grade_handwriting, system_prompt, images)
+            except Exception as e:
+                print(f"[grade_node] Vision grading failed ({e}). Falling back to text-based grading...")
+                result = await asyncio.to_thread(grade_text, system_prompt, answer_text)
+                if isinstance(result, dict):
+                    if "handwriting_clarity" not in result:
+                        result["handwriting_clarity"] = 0
+                    if "handwriting_audit" not in result:
+                        result["handwriting_audit"] = {
+                            "spacing_score": 0, "clarity_score": 0, "alignment_score": 0, "completeness_score": 0,
+                            "overall_comments": "Handwriting quality audit skipped (using text fallback)."
+                        }
         else:
             result = await asyncio.to_thread(grade_text, system_prompt, answer_text)
         result["detected_scope"] = {"grade": state["grade_level"], "subject": state["subject"], "chapter": state["chapter"]}
