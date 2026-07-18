@@ -9,7 +9,7 @@ Public API:
         match the target reading level. Adds `_readability` metadata.
 
     grade_target_fk(grade: int) -> int
-        Returns the target Flesch-Kincaid grade level for a given CBSE grade.
+        Returns the target Flesch-Kincaid grade level for a given grade.
 """
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ _VOCAB_SIMPLE = [(re.compile(p, re.IGNORECASE), r) for p, r in _VOCAB_SIMPLE]
 
 
 def grade_target_fk(grade: int) -> int:
-    """Return target Flesch-Kincaid grade level for a CBSE grade."""
+    """Return target Flesch-Kincaid grade level for a given grade."""
     if grade <= 4:  return 3   # very simple (FK 2-4)
     if grade <= 8:  return 7   # standard middle-school (FK 6-8)
     return 10                  # board-exam appropriate (FK 9-12)

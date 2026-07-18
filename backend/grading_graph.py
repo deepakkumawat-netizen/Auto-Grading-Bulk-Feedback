@@ -18,11 +18,11 @@ class GradingState(TypedDict):
     rubric: str
     verify: bool
     declared_total: int
-    do_ncert_check: bool
     do_study_plan: bool
     grade_override: int
     subject_override: str
     exam_config: Optional[Dict[str, Any]]
+    handwriting_audit: bool
 
     # Intermediate fields
     grade_level: int
@@ -36,14 +36,15 @@ class GradingState(TypedDict):
     math_check: Dict[str, Any]
     verifier_result: Dict[str, Any]
     study_plan_result: List[str]
+    images: List[tuple[bytes, str]]
     error: Optional[str]
 
     # Output
     final_output: Dict[str, Any]
 
 
-def ocr_and_preflight_node(state: GradingState) -> Dict[str, Any]:
-    from main import _read_sheet, _fast_scope, pre_flight_check
+async def ocr_and_preflight_node(state: GradingState) -> Dict[str, Any]:
+    from main import _read_sheet, _fast_scope, pre_flight_check, _render_pdf_to_pngs
     
     filename = state["filename"]
     raw = state["raw_bytes"]
@@ -51,9 +52,27 @@ def ocr_and_preflight_node(state: GradingState) -> Dict[str, Any]:
     grade_override = state["grade_override"]
     subject_override = state["subject_override"]
     exam_config = state["exam_config"]
+    handwriting_audit = state.get("handwriting_audit", False)
     
-    # ── OCR Extraction ──────────────────────────────────────────────────────
-    answer_text = _read_sheet(filename, raw)
+    # ── Image Pages Extraction for Handwriting Audit ────────────────────────
+    images = []
+    filename_lower = filename.lower()
+    if filename_lower.endswith(".pdf"):
+        try:
+            page_blobs = _render_pdf_to_pngs(raw, max_pages=15, dpi=110)
+            images = [(b, "image/jpeg") for b in page_blobs]
+        except Exception as e:
+            print(f"[grading_graph] Failed to render PDF to images: {e}")
+    elif filename_lower.endswith((".png", ".jpg", ".jpeg", ".webp")):
+        mime = "image/png" if filename_lower.endswith(".png") else "image/jpeg"
+        images = [(raw, mime)]
+
+    # ── OCR / Concurrent Transcription ──────────────────────────────────────
+    if handwriting_audit and images:
+        from llm_router import transcribe_all_pages_concurrently
+        answer_text = await transcribe_all_pages_concurrently(images)
+    else:
+        answer_text = await asyncio.to_thread(_read_sheet, filename, raw)
     
     extraction_hint = ""
     error = None
@@ -87,7 +106,8 @@ def ocr_and_preflight_node(state: GradingState) -> Dict[str, Any]:
             "grade_level": grade_level,
             "subject": subject,
             "chapter": chapter,
-            "extraction_hint": extraction_hint
+            "extraction_hint": extraction_hint,
+            "images": images
         }
         
     checks = pre_flight_check(answer_text, filename, rubric)
@@ -97,7 +117,7 @@ def ocr_and_preflight_node(state: GradingState) -> Dict[str, Any]:
     subject = subject_override or subject or "General"
     
     from grading_prompts import bulk_grader_prompt
-    system_prompt = bulk_grader_prompt(grade_level, subject, chapter, rubric, exam_config=exam_config)
+    system_prompt = bulk_grader_prompt(grade_level, subject, chapter, rubric, exam_config=exam_config, handwriting_audit=handwriting_audit)
     
     return {
         "answer_text": answer_text,
@@ -106,10 +126,11 @@ def ocr_and_preflight_node(state: GradingState) -> Dict[str, Any]:
         "chapter": chapter,
         "extraction_hint": extraction_hint,
         "pre_flight_checks": checks,
-        "system_prompt": system_prompt
+        "system_prompt": system_prompt,
+        "images": images
     }
-
-
+ 
+ 
 async def grade_node(state: GradingState) -> Dict[str, Any]:
     if state.get("error"):
         return {}
@@ -120,17 +141,97 @@ async def grade_node(state: GradingState) -> Dict[str, Any]:
     answer_text = state["answer_text"]
     rubric = state["rubric"]
     declared_total = state["declared_total"]
+    handwriting_audit = state.get("handwriting_audit", False)
+    images = state.get("images", [])
     
     try:
-        result = await asyncio.to_thread(grade_text, system_prompt, answer_text)
+        if handwriting_audit and images:
+            from llm_router import grade_handwriting
+            result = await asyncio.to_thread(grade_handwriting, system_prompt, images)
+        else:
+            result = await asyncio.to_thread(grade_text, system_prompt, answer_text)
         result["detected_scope"] = {"grade": state["grade_level"], "subject": state["subject"], "chapter": state["chapter"]}
         
         # Recalculate and scale marks
         pq = result.get("per_question") or []
         rubric_total = _sum_rubric_marks(rubric)
         if pq:
-            computed_total   = sum(float(q.get("marks_total",   0) or 0) for q in pq)
-            computed_awarded = sum(float(q.get("marks_awarded", 0) or 0) for q in pq)
+            import re
+            
+            parsed_items = []
+            for item in pq:
+                q_label = str(item.get("q") or "").strip()
+                parts = []
+                m_main = re.match(r'^(?:Q(?:uestion)?\s*(\d+)|\b\d+\b)', q_label, re.IGNORECASE)
+                if m_main:
+                    main_val = m_main.group(0).upper().replace("UESTION", "").replace(" ", "")
+                    if not main_val.startswith("Q"):
+                        main_val = "Q" + main_val
+                    parts.append(main_val)
+                    rest = q_label[m_main.end():]
+                    sub_parts = re.findall(r'[\(\[]([^\]\)]+)[\)\]]|\b([a-zA-Z0-9]+)\b', rest)
+                    for sp in sub_parts:
+                        val = (sp[0] or sp[1] or "").strip()
+                        if val:
+                            parts.append(val)
+                else:
+                    parts.append(q_label.upper())
+                
+                parsed_items.append({
+                    "parts": parts,
+                    "marks_awarded": float(item.get("marks_awarded", 0) or 0),
+                    "marks_total": float(item.get("marks_total", 0) or 0)
+                })
+                
+            def aggregate_node(node_path, items):
+                remaining_items = [it for it in items if len(it["parts"]) > len(node_path)]
+                if not remaining_items:
+                    return sum(it["marks_total"] for it in items), sum(it["marks_awarded"] for it in items)
+                    
+                groups = {}
+                for it in remaining_items:
+                    next_part = it["parts"][len(node_path)]
+                    if next_part not in groups:
+                        groups[next_part] = []
+                    groups[next_part].append(it)
+                    
+                has_or = False
+                if len(groups) > 1:
+                    for key in groups.keys():
+                        if key.upper() == "OR" or "OR" in key.upper():
+                            has_or = True
+                            break
+                        if re.match(r'^[A-Z]$', key):
+                            has_or = True
+                            break
+                            
+                child_results = []
+                for key, group_items in groups.items():
+                    child_results.append(aggregate_node(node_path + [key], group_items))
+                    
+                if has_or:
+                    block_total = max(r[0] for r in child_results) if child_results else 0
+                    block_awarded = max(r[1] for r in child_results) if child_results else 0
+                else:
+                    block_total = sum(r[0] for r in child_results)
+                    block_awarded = sum(r[1] for r in child_results)
+                    
+                return block_total, block_awarded
+
+            main_groups = {}
+            for it in parsed_items:
+                if it["parts"]:
+                    main_key = it["parts"][0]
+                    if main_key not in main_groups:
+                        main_groups[main_key] = []
+                    main_groups[main_key].append(it)
+                    
+            computed_total = 0.0
+            computed_awarded = 0.0
+            for main_key, items in main_groups.items():
+                q_total, q_awarded = aggregate_node([main_key], items)
+                computed_total += q_total
+                computed_awarded += q_awarded
             
             if computed_total > 0 or rubric_total > 0:
                 if declared_total > 0:      final_total = declared_total
@@ -282,11 +383,11 @@ workflow.add_node("polish", polish_node)
 # Add parallel edges
 workflow.add_edge(START, "ocr_and_preflight")
 
-# From ocr_and_preflight, run math_check and grade in parallel
-workflow.add_edge("ocr_and_preflight", "math_check")
+# Run grade node after ocr_and_preflight
 workflow.add_edge("ocr_and_preflight", "grade")
 
-# From grade, run verifier and study_plan in parallel
+# From grade, run math_check, verifier, and study_plan in parallel
+workflow.add_edge("grade", "math_check")
 workflow.add_edge("grade", "verifier")
 workflow.add_edge("grade", "study_plan")
 

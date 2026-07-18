@@ -1,9 +1,9 @@
-# Auto-Grading & Bulk Feedback
-
+# Auto Grade
+ 
 AI-powered bulk answer sheet grader for CBSE schools. Upload 1–50 answer sheets (PDF/JPG/PNG), get per-student marks, step-by-step feedback, and downloadable feedback PDFs — in seconds.
-
+ 
 ## Features
-
+ 
 - **Bulk grading** — grade up to 50 sheets in a single upload
 - **Teacher Customization Panel** — set board, grade, subject, question-wise marks, grading rules, and feedback style
 - **Grade-adaptive evaluation** — 5 grade tiers (1–2, 3–5, 6–8, 9–10, 11–12) with tier-appropriate strictness and feedback tone
@@ -94,7 +94,7 @@ Results: per-student marks, feedback PDF, class analytics
 ## Project Structure
 
 ```
-AutoGrader/
+AutoGrade/
 ├── backend/
 │   ├── main.py                  # FastAPI app, all endpoints
 │   ├── grading_prompts.py       # Grade-adaptive prompt + exam constraints

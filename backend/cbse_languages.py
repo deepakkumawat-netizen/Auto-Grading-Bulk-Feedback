@@ -1,13 +1,13 @@
-"""CBSE-approved languages for answer writing and their scripts/states.
+"""Approved languages for answer writing and their scripts/states.
 
-CBSE national policy: students write answers in the medium of instruction of
-their school. All languages below are officially approved by CBSE for answer
+National policy: students write answers in the medium of instruction of
+their school. All languages below are officially approved for answer
 writing in examinations.
 """
 from __future__ import annotations
 
-# Complete map: language name → { script, states, cbse_code }
-CBSE_LANGUAGES: dict[str, dict] = {
+# Complete map: language name → { script, states, code }
+APPROVED_LANGUAGES: dict[str, dict] = {
     "Hindi":       {"script": "Devanagari",  "code": "002",
                     "states": ["All India"], "sample": "प्रकाश संश्लेषण"},
     "English":     {"script": "Latin",        "code": "101",
@@ -27,7 +27,7 @@ CBSE_LANGUAGES: dict[str, dict] = {
     "Gujarati":    {"script": "Gujarati",     "code": "016",
                     "states": ["Gujarat"], "sample": "પ્રકાશસંશ્લેષણ"},
     "Kannada":     {"script": "Kannada",      "code": "017",
-                    "states": ["Karnataka"], "sample": "ದ್ಯುತಿಸಂಶ್ಲೇಷಣೆ"},
+                    "states": ["Karnataka"], "sample": "ದ್ಯುತಿಸंಶ್ಲೇಷಣೆ"},
     "Odia":        {"script": "Odia",         "code": "012",
                     "states": ["Odisha"], "sample": "ଆଲୋକ ସଂଶ୍ଳେଷଣ"},
     "Punjabi":     {"script": "Gurmukhi",     "code": "029",
@@ -67,26 +67,26 @@ CBSE_LANGUAGES: dict[str, dict] = {
                     "sample": "प्रकाश संश्लेषण"},
     "Santali":     {"script": "Ol Chiki",     "code": "035",
                     "states": ["Jharkhand", "Odisha", "West Bengal"],
-                    "sample": "ᱯᱷᱚᱴᱚᱥᱤᱱᱛᱷᱮᱥᱤᱥ"},
+                    "sample": "ᱯᱷᱚտᱚᱥᱤᱱᱛᱷᱮᱥᱤᱥ"},
     "Mizo":        {"script": "Latin",        "code": "036",
                     "states": ["Mizoram"], "sample": "Chhanna inbuatsaihna"},
     "Arabic":      {"script": "Arabic",       "code": "201",
                     "states": ["Select areas"], "sample": "التمثيل الضوئي"},
 }
 
-# All unique scripts used across CBSE-approved languages
-ALL_SCRIPTS: list[str] = sorted({v["script"] for v in CBSE_LANGUAGES.values()})
+# All unique scripts used across approved languages
+ALL_SCRIPTS: list[str] = sorted({v["script"] for v in APPROVED_LANGUAGES.values()})
 
 # OCR instruction block for Gemini - tells it every script it may encounter
 def ocr_language_block() -> str:
     script_examples = "\n".join(
         f"  - {lang} ({info['script']} script, {', '.join(info['states'][:2])}): "
         f"e.g. \"{info['sample']}\""
-        for lang, info in CBSE_LANGUAGES.items()
+        for lang, info in APPROVED_LANGUAGES.items()
         if lang not in ("English",)  # English is obvious; skip
     )
     return (
-        "MULTI-SCRIPT TRANSCRIPTION - CBSE students write in their state language:\n"
+        "MULTI-SCRIPT TRANSCRIPTION - students may write in their state/approved language:\n"
         f"{script_examples}\n"
         "Rules:\n"
         "  - Transcribe every script exactly as written - DO NOT translate.\n"
@@ -99,16 +99,16 @@ def ocr_language_block() -> str:
     )
 
 
-# Grading instruction block - tells the AI to grade concepts in all CBSE languages
+# Grading instruction block - tells the AI to grade concepts in all approved languages
 def grading_language_block() -> str:
-    lang_list = ", ".join(CBSE_LANGUAGES.keys())
-    return f"""MULTI-LANGUAGE GRADING - CBSE National Policy
-CBSE officially permits answer writing in the school's medium of instruction.
+    lang_list = ", ".join(APPROVED_LANGUAGES.keys())
+    return f"""MULTI-LANGUAGE GRADING - National Language Policy
+Officially permits answer writing in the school's medium of instruction.
 Approved languages: {lang_list}.
 
 Rules - apply to every question:
   [OK] A correct concept explained in Telugu, Bengali, Tamil, Marathi, Gujarati, Kannada,
-      Odia, Punjabi, Urdu, Malayalam, Assamese, Hindi, Nepali, or any other CBSE language
+      Odia, Punjabi, Urdu, Malayalam, Assamese, Hindi, Nepali, or any other approved language
       earns EXACTLY the same marks as the same concept in English.
   [OK] Mixed-language answers (e.g. Kannada sentences + English technical terms like
       "photosynthesis" or chemical formulas) are standard practice - award full marks

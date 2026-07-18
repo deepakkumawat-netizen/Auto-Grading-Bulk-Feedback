@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import Field from '../ui/Field.jsx'
 import { useCurriculum } from '../hooks/useCurriculum.js'
 
-const GRADES = [10]
+const GRADES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
 export default function GradeSubjectChapter({ value, onChange, disabled }) {
   const { grade = 6, subject = '', chapter = '' } = value || {}

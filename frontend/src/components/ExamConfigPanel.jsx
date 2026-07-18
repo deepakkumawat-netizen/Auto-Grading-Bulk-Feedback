@@ -135,6 +135,24 @@ export default function ExamConfigPanel({ value, onChange, apiBase = "/api" }) {
             <div className="ecp-section-label">Exam setup</div>
             <div className="ecp-grid-2">
               <label className="ecp-field">
+                <span>Class / Grade *</span>
+                <select value={cfg.grade || ""} onChange={e => update({ grade: parseInt(e.target.value) || "" })}>
+                  <option value="">Select Grade</option>
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(g => (
+                    <option key={g} value={g}>Grade {g}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="ecp-field">
+                <span>Subject *</span>
+                <select value={cfg.subject || ""} onChange={e => update({ subject: e.target.value })}>
+                  <option value="">Select Subject</option>
+                  {SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </label>
+            </div>
+            <div className="ecp-grid-2">
+              <label className="ecp-field">
                 <span>Board</span>
                 <select value={cfg.board || "CBSE"} onChange={e => update({ board: e.target.value })}>
                   {BOARDS.map(b => <option key={b}>{b}</option>)}

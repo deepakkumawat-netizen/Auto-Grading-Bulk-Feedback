@@ -1915,3 +1915,388 @@ select.total-marks-input,
 .ecp-saved-meta { font-size: 11px; color: #64748b; }
 .grade-tier-badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 500; background: rgba(16,185,129,0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.25); }
 [data-theme="light"] .grade-tier-badge { background: rgba(16,185,129,0.1); color: #059669; }
+
+
+/* === HandwritingEval Integrated Styles === */
+
+/* 📊 SRD Teacher Diagnostic Dashboard Styles */
+.srd-dashboard-card {
+  margin-top: 24px;
+  margin-bottom: 24px;
+  padding: 24px;
+  border-radius: 16px;
+  background: rgba(30, 41, 59, 0.4);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+[data-theme="light"] .srd-dashboard-card {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.srd-dashboard-title {
+  margin-top: 0;
+  margin-bottom: 20px;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-strong);
+  letter-spacing: -0.01em;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+}
+
+.srd-category-scores {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.srd-score-tile {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+[data-theme="light"] .srd-score-tile {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.srd-score-tile:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-accent);
+}
+
+.tile-icon {
+  font-size: 24px;
+  margin-bottom: 8px;
+}
+
+.tile-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.tile-score {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text-strong);
+  margin-bottom: 10px;
+}
+
+.tile-progress-bg {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  overflow: hidden;
+}
+[data-theme="light"] .tile-progress-bg {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.tile-progress-fill {
+  height: 100%;
+  border-radius: 10px;
+}
+
+.tile-progress-fill.hw { background: #10b981; }
+.tile-progress-fill.gs { background: #3b82f6; }
+.tile-progress-fill.math { background: #f59e0b; }
+.tile-progress-fill.vis { background: #8b5cf6; }
+.tile-progress-fill.comp { background: #ec4899; }
+
+.srd-section {
+  margin-top: 20px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 20px;
+}
+
+.srd-sec-title {
+  margin-top: 0;
+  margin-bottom: 14px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-strong);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.srd-hw-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  margin-bottom: 10px;
+}
+
+.srd-hw-metric {
+  font-size: 13.5px;
+  color: var(--text-muted);
+}
+
+.srd-hw-metric strong {
+  color: var(--text-strong);
+}
+
+.srd-status-good {
+  color: #10b981;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.srd-status-wandering, .srd-status-uneven {
+  color: #f59e0b;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.srd-status-poor, .srd-status-cramped {
+  color: #ef4444;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.srd-hw-comment {
+  font-size: 13px;
+  color: var(--text-faded);
+  margin-top: 8px;
+  margin-bottom: 0;
+}
+
+.srd-gs-scores {
+  margin-bottom: 12px;
+  font-size: 13.5px;
+  color: var(--text-muted);
+}
+
+.srd-gs-scores strong {
+  color: var(--text-strong);
+}
+
+.srd-table-wrapper {
+  overflow-x: auto;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.srd-error-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  text-align: left;
+}
+
+.srd-error-table th {
+  background: rgba(15, 23, 42, 0.8);
+  padding: 10px 14px;
+  color: var(--text-strong);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+[data-theme="light"] .srd-error-table th {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.srd-error-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-dim);
+  color: var(--text-muted);
+  vertical-align: top;
+}
+
+.srd-error-table tr:last-child td {
+  border-bottom: none;
+}
+
+.srd-err-orig {
+  color: #fca5a5;
+  text-decoration: line-through;
+  font-family: monospace;
+}
+[data-theme="light"] .srd-err-orig {
+  color: #dc2626;
+}
+
+.srd-err-corr {
+  color: #86efac;
+  font-weight: 600;
+  font-family: monospace;
+}
+[data-theme="light"] .srd-err-corr {
+  color: #16a34a;
+}
+
+.srd-err-type {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.srd-err-type.spelling {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+[data-theme="light"] .srd-err-type.spelling {
+  background: rgba(220, 38, 38, 0.08);
+  color: #b91c1c;
+}
+
+.srd-err-type.grammar {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+[data-theme="light"] .srd-err-type.grammar {
+  background: rgba(37, 99, 235, 0.08);
+  color: #1d4ed8;
+}
+
+.srd-err-expl {
+  font-size: 12.5px;
+}
+
+.srd-no-errors {
+  padding: 12px;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  border-radius: 8px;
+  color: #6ee7b7;
+  font-size: 13.5px;
+  text-align: center;
+}
+[data-theme="light"] .srd-no-errors {
+  color: #047857;
+  background: rgba(16, 185, 129, 0.05);
+}
+
+.srd-visual-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.srd-visual-card {
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.4);
+}
+[data-theme="light"] .srd-visual-card {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.srd-visual-card.detected {
+  border-left: 3px solid #10b981;
+}
+
+.srd-visual-card.not-detected {
+  opacity: 0.65;
+  border-left: 3px solid var(--text-faded);
+}
+
+.srd-visual-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.srd-visual-icon {
+  font-size: 16px;
+}
+
+.srd-visual-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-strong);
+  flex-grow: 1;
+}
+
+.srd-visual-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 100px;
+  font-weight: 700;
+}
+
+.srd-visual-badge.detected {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+}
+[data-theme="light"] .srd-visual-badge.detected {
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
+}
+
+.srd-visual-badge.not-detected {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-muted);
+}
+
+.srd-visual-comment {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  padding-top: 6px;
+  margin-top: 6px;
+}
+[data-theme="light"] .srd-visual-comment {
+  border-top-color: rgba(0, 0, 0, 0.06);
+}
+
+.srd-completeness-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.srd-complete-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.srd-complete-badge.status-complete {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+[data-theme="light"] .srd-complete-badge.status-complete {
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
+}
+
+.srd-complete-badge.status-partial {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+[data-theme="light"] .srd-complete-badge.status-partial {
+  background: rgba(217, 119, 6, 0.1);
+  color: #d97706;
+}
+
+.srd-complete-badge.status-incomplete {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+[data-theme="light"] .srd-complete-badge.status-incomplete {
+  background: rgba(220, 38, 38, 0.1);
+  color: #dc2626;
+}
+
+.srd-complete-comment {
+  font-size: 13px;
+  color: var(--text-muted);
+}

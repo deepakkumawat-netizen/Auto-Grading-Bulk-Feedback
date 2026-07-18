@@ -75,7 +75,7 @@ def insights_chat(
     stats   = _class_stats(results)
     context = _compact_results(results)
 
-    system = f"""You are an AI teaching co-pilot. A CBSE teacher just finished grading {stats.get('count', 0)} answer sheets.
+    system = f"""You are an AI teaching co-pilot. A teacher just finished grading {stats.get('count', 0)} answer sheets.
 
 CLASS RESULTS:
 {context}
@@ -95,7 +95,6 @@ YOUR ROLE — answer anything the teacher asks:
 • Suggest which topic to reteach and how
 • Generate practice questions on request ("give 5 questions on Q3 topic")
 • List students who need extra attention
-• Suggest NCERT references for revision
 
 Style: Direct. Bullet points for lists. Under 180 words unless generating questions.
 If the teacher asks for practice questions, generate them numbered with answer keys."""
@@ -128,18 +127,18 @@ def generate_practice(
     mistake_types = ", ".join({m.get("type","") for m in mist[:4]} - {""}) or "conceptual"
 
     prompt = (
-        f"Generate exactly {count} CBSE practice questions for a Grade {grade_level} {subject} student.\n\n"
+        f"Generate exactly {count} practice questions for a Grade {grade_level} {subject} student.\n\n"
         f"Student's weak areas:\n{weak_detail}\n"
         f"Mistake pattern: {mistake_types}\n"
         f"Chapter: {chapter or 'as detected'}\n\n"
         f"Rules:\n"
         f"- Target the SPECIFIC topics the student got wrong\n"
         f"- 2 easy (recall), 2 medium (apply), 1 hard (analyse/evaluate)\n"
-        f"- Match CBSE exam format and mark weightage for Grade {grade_level}\n"
+        f"- Match exam format and mark weightage for Grade {grade_level}\n"
         f"- Include a concise answer key for each\n\n"
         "Return STRICT JSON only:\n"
         '{"questions":[{"number":1,"question":"...","marks":1,"difficulty":"easy",'
-        '"answer_key":"key points","ncert_ref":"chapter/section or empty"}]}'
+        '"answer_key":"key points"}]}'
     )
     raw = _groq_chat_with_retry(
         model,
@@ -170,13 +169,13 @@ def generate_class_plan(results: list[dict], rubric: str) -> dict:
     ][:6]
 
     prompt = (
-        f"You are a CBSE curriculum expert. Analyze these Grade-level results and create a precise intervention plan.\n\n"
+        f"You are a curriculum expert. Analyze these Grade-level results and create a precise intervention plan.\n\n"
         f"CLASS RESULTS:\n{ctx}\n\n"
         f"Top mistake types: {', '.join(f'{k}({v})' for k,v in stats.get('top_mistakes',[]))}\n"
         f"Most-missed questions: {', '.join(f'\"{k}\"({v})' for k,v in stats.get('top_weak_qs',[]))}\n"
         f"Students scoring <50%: {', '.join(struggling) or 'none'}\n"
         f"Class average: {stats.get('avg',0):.1f}%\n\n"
-        "Create a 30-40 minute intervention lesson. Be very specific — name actual NCERT concepts, activities, and questions.\n\n"
+        "Create a 30-40 minute intervention lesson. Be very specific — name actual core concepts, activities, and questions.\n\n"
         "Return STRICT JSON only:\n"
         '{"class_health":"strong|average|needs_help","summary":"one sentence",'
         '"priority_topics":["topic1","topic2","topic3"],'

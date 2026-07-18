@@ -31,7 +31,7 @@ export default function Landing({ onStart }) {
       <nav className="nav">
         <button className="brand" onClick={onStart}>
           <span className="brand-mark">📝</span>
-          <span className="brand-name">Auto-Grading &amp; Bulk Feedback</span>
+          <span className="brand-name">Auto Grade</span>
         </button>
         <div className="nav-right">
           <ThemeToggle />
@@ -93,12 +93,12 @@ export default function Landing({ onStart }) {
         <h2>Get your evenings back.</h2>
         <p>Grade your next assignment in minutes instead of hours.</p>
         <Button variant="primary" size="lg" onClick={onStart} icon="🚀">
-          Launch AutoGrader
+          Launch Auto Grade
         </Button>
       </section>
 
       <footer className="foot">
-        Auto-Grading &amp; Bulk Feedback · <b>Powered By Codevidhya</b>
+        Auto Grade · <b>Powered By Codevidhya</b>
       </footer>
     </div>
   )

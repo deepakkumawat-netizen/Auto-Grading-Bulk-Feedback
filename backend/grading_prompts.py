@@ -118,7 +118,7 @@ _TONE = {
         "rule from Chapter 5 - review section 5.2 and try again.'"
     ),
     "senior": (
-        "You are talking to a 14-17 year old preparing for CBSE board exams. Use "
+        "You are talking to a 14-17 year old preparing for board exams. Use "
         "precise, exam-focused language. Sentences can be 18-28 words. No emojis. "
         "Use the correct "
         "technical vocabulary ('transposition', 'derivation', 'corollary'). Treat the "
@@ -129,45 +129,157 @@ _TONE = {
 
 
 def _sum_rubric_marks(rubric: str) -> int:
-    """Sum mark allocations from every rubric line.
-
-    Handles all common formats the rubric generator produces:
-      - Q1 (5 marks): ...       → 5
-      - Q28.1 (1): ...          → 1   ← was being missed!
-      - Q2 [3 marks] ...        → 3
-      - Q3 - 2 marks ...        → 2
-    Processes each line exactly once to avoid double-counting.
-    """
+    """Sum mark allocations from every rubric line hierarchically to avoid double-counting choices."""
     import re
-    total = 0
+    
+    def parse_single_mark_value(text: str) -> float:
+        text = text.strip().lower()
+        # Replace unicode fractions with +decimal
+        text = text.replace("½", "+0.5").replace("¼", "+0.25").replace("¾", "+0.75")
+        
+        # Split by whitespace, '+', or '-'
+        parts = re.split(r'[\s\-+]+', text)
+        val = 0.0
+        for p in parts:
+            p = p.strip()
+            if not p:
+                continue
+            if "/" in p:
+                subparts = p.split("/")
+                if len(subparts) == 2:
+                    try:
+                        val += float(subparts[0]) / float(subparts[1])
+                    except ValueError:
+                        pass
+            else:
+                try:
+                    val += float(p)
+                except ValueError:
+                    pass
+        return val
+
+    pq = []
     for line in rubric.splitlines():
         line = line.strip()
         if not line:
             continue
-        # Only count marks on lines that define a question (starts with Q/q/Question)
         line_clean = re.sub(r"^[-*#\s]+", "", line)
-        if not re.match(r"^(?:q\d+|question\s*\d+|q\s*\d+)", line_clean, re.IGNORECASE):
+        if not re.match(r"^(?:q\d+|question\s*\d+|q\s*\d+|\b\d+[\.\)])", line_clean, re.IGNORECASE):
             continue
-        # Pattern 1: (X marks) or (X mark)  - e.g. Q1 (5 marks):
-        m = re.search(r"\((\d+)\s*marks?\)", line_clean, re.IGNORECASE)
+            
+        colon_idx = line_clean.find(":")
+        header = line_clean[:colon_idx].strip() if colon_idx != -1 else line_clean
+        
+        # Parse marks total
+        m_val = 0.0
+        m = re.search(r"\(([\d\./\s\+½¼¾\-]+)\s*marks?\)", line_clean, re.IGNORECASE)
         if m:
-            total += int(m.group(1))
-            continue
-        # Pattern 2: [X marks] or [X mark]  - e.g. Q1 [5 marks]
-        m = re.search(r"\[(\d+)\s*marks?\]", line_clean, re.IGNORECASE)
-        if m:
-            total += int(m.group(1))
-            continue
-        # Pattern 3: Q<id> (X):  with NO "marks" keyword - e.g. Q28.1 (1):
-        m = re.search(r"^Q[\w.]*\s*\((\d+)\)\s*:", line_clean, re.IGNORECASE)
-        if m:
-            total += int(m.group(1))
-            continue
-    return total
+            m_val = parse_single_mark_value(m.group(1))
+        else:
+            m = re.search(r"\[([\d\./\s\+½¼¾\-]+)\s*marks?\]", line_clean, re.IGNORECASE)
+            if m:
+                m_val = parse_single_mark_value(m.group(1))
+            else:
+                m = re.search(r"\(([\d\./\s\+½¼¾\-]+)\)", header)
+                if m:
+                    m_val = parse_single_mark_value(m.group(1))
+                    
+        if m_val > 0.0:
+            clean_hdr = re.sub(r'[\(\[]\s*[\d\./\s\+½¼¾\-]+\s*(?:marks?)?\s*[\)\]]', '', header).strip()
+            pq.append({
+                "q": clean_hdr,
+                "marks_total": m_val,
+                "marks_awarded": 0.0,
+                "full_line": line_clean
+            })
+            
+    if not pq:
+        return 0
+        
+    parsed_items = []
+    for item in pq:
+        q_label = str(item["q"]).strip()
+        parts = []
+        m_main = re.match(r'^(?:Q(?:uestion)?\s*(\d+)|\b\d+\b)', q_label, re.IGNORECASE)
+        if m_main:
+            main_val = m_main.group(0).upper().replace("UESTION", "").replace(" ", "")
+            if not main_val.startswith("Q"):
+                main_val = "Q" + main_val
+            parts.append(main_val)
+            rest = q_label[m_main.end():]
+            sub_parts = re.findall(r'[\(\[]([^\]\)]+)[\)\]]|\b([a-zA-Z0-9]+)\b', rest)
+            for sp in sub_parts:
+                val = (sp[0] or sp[1] or "").strip()
+                if val:
+                    parts.append(val)
+        else:
+            parts.append(q_label.upper())
+        
+        parsed_items.append({
+            "parts": parts,
+            "marks_total": item["marks_total"],
+            "full_line": item.get("full_line", "")
+        })
+        
+    def aggregate_node(node_path, items):
+        remaining_items = [it for it in items if len(it["parts"]) > len(node_path)]
+        if not remaining_items:
+            return sum(it["marks_total"] for it in items)
+            
+        groups = {}
+        for it in remaining_items:
+            next_part = it["parts"][len(node_path)]
+            if next_part not in groups:
+                groups[next_part] = []
+            groups[next_part].append(it)
+            
+        has_or = False
+        if len(groups) > 1:
+            for key in groups.keys():
+                k_upper = key.upper()
+                if k_upper == "OR" or "OR" in k_upper or "अथवा" in key:
+                    has_or = True
+                    break
+                if re.match(r'^[A-Z]$', key):
+                    has_or = True
+                    break
+                    
+            if not has_or:
+                for it in items:
+                    full_line = it.get("full_line", "")
+                    colon_idx = full_line.find(":")
+                    header = full_line[:colon_idx] if colon_idx != -1 else full_line
+                    header_upper = header.upper()
+                    if " OR " in header_upper or " OR:" in header_upper or "(OR)" in header_upper or "अथवा" in header or " या " in header:
+                        has_or = True
+                        break
+                        
+        child_totals = []
+        for key, group_items in groups.items():
+            child_totals.append(aggregate_node(node_path + [key], group_items))
+            
+        if has_or:
+            return max(child_totals) if child_totals else 0
+        else:
+            return sum(child_totals)
+            
+    main_groups = {}
+    for it in parsed_items:
+        if it["parts"]:
+            main_key = it["parts"][0]
+            if main_key not in main_groups:
+                main_groups[main_key] = []
+            main_groups[main_key].append(it)
+            
+    total_marks = 0.0
+    for main_key, items in main_groups.items():
+        total_marks += aggregate_node([main_key], items)
+        
+    return int(round(total_marks))
 
 
 def bulk_grader_prompt(grade: int, subject: str, chapter: str, rubric: str,
-                       exam_config: dict = None) -> str:
+                       exam_config: dict = None, handwriting_audit: bool = False) -> str:
     tone = _TONE[_tier(grade)]
     ctx = ""
     declared_total = _sum_rubric_marks(rubric)
@@ -179,13 +291,144 @@ def bulk_grader_prompt(grade: int, subject: str, chapter: str, rubric: str,
         f"Your `per_question` marks_total values must also sum to exactly this number. "
         "Do NOT invent extra marks or count parent questions AND sub-questions separately.\n"
     ) if declared_total > 0 else ""
-    return f"""{exam_block}You are a CBSE Grade {grade} {subject} examiner grading the chapter \
+
+    tone_rules_block = f"TONE RULES (must follow strictly for all feedback/suggestions/mistakes):\n{tone}{ctx}"
+
+    if handwriting_audit:
+        # Append HandwritingEval specialized guidelines and tone guidelines
+        handwriting_guidelines = """
+═══════════════════════════════════════════════
+📋 HANDWRITING, GRAMMAR & QUALITY AUDIT INSTRUCTIONS
+═══════════════════════════════════════════════
+You must perform the following audit steps on the provided handwritten answer sheet images:
+
+Step 1 - Transcribe all content: You MUST transcribe the ENTIRE student answer sheet page-by-page, word-for-word. Do NOT summarize and do NOT omit any text, sentences, calculations, or steps. Transcribe everything verbatim (keeping misspelled words or shorthand in this verbatim transcript). If there are multiple pages, include page headers like '--- PAGE 1 ---', etc., and transcribe the complete content of each page. Every single line of written text on the sheet must be present in the transcript.
+Step 1.1 - Create a polished, corrected, and highly readable version of the verbatim transcript in clear, standard language (named "cleaned_transcript"). You MUST polish the ENTIRE verbatim transcript word-for-word, correcting all spelling mistakes, typos, awkward phrasing, grammatical issues, and formatting all math equations/tables cleanly. The goal is to provide a complete, clean, readable copy of the student's text that the teacher can easily read and understand. Do NOT summarize or abbreviate.
+Step 2 - Break the answer into logical steps (lines of working / parts of the argument / diagram labels / table rows).
+Step 3 - For each step decide: correct / wrong / partial.
+Step 4 - Identify the FIRST conceptual mistake (the one that derails everything after). If the student got everything right, set first_mistake to null.
+Step 5 - Determine if the text is HANDWRITTEN or TYPED/PRINTED:
+   - Set `is_typed: true` if letters look uniform (same width/height, same font), perfectly aligned on the baseline, no ink variation, no slant inconsistency.
+   - Set `is_typed: false` only if you can see clear evidence of handwriting: irregular letter sizes, varying slant, ink-pressure variation, hand-drawn baseline drift, pen smudges, or non-uniform spacing.
+   If is_typed = true: set `handwriting_clarity` to 0.
+   If is_typed = false: rate STRICTLY using these criteria — DO NOT BE GENEROUS:
+     ★ (1)     Mostly illegible. Many letters unreadable. Heavy strikethroughs or scribbles.
+     ★★ (2)    Very messy. Reader must guess most words. Inconsistent letter sizes, wandering baseline.
+     ★★★ (3)   Readable with effort. Several letters ambiguous; some words need context to decode.
+     ★★★★ (4) Clear handwriting with minor inconsistencies.
+     ★★★★★ (5) Exceptional — uniform letter sizes, clean baseline, no smudges, every letter instantly readable.
+Step 6 - Score effort (`effort_score`, 0-100) — INDEPENDENT of correctness:
+   - 0:     blank / no attempt visible
+   - 1-30:  minimal attempt, almost no working
+   - 31-60: some steps shown but incomplete
+   - 61-85: clear working shown for most of the answer (even if final result wrong)
+   - 86-100: thorough, complete working with all reasoning visible
+Step 7 - Analyze handwriting quality (clarity, alignment, spacing, readability comment) and map to a 0-100 handwriting quality rating score.
+Step 8 - Check grammar and spelling. Find all spelling, punctuation, and grammar errors, extract their details, and calculate grammar/spelling quality scores out of 100.
+Step 9 - Evaluate visual elements. Identify and evaluate any graphs, diagrams, sketches, arrows, maps, dots, tables, and shapes. For each: set detected (true/false), score correctness (0-100 or null if not detected), and write a comment.
+Step 10 - Check homework completeness (score 0-100, status: complete/incomplete/partial, comment on missing parts).
+Step 11 - Calculate category-wise scores out of 100: handwriting_quality, grammar_and_spelling, math_and_equations, diagrams_and_visuals, completeness. These are quality rating percentages, not exam marks.
+Step 12 - Write feedback. If is_typed = true, note in the feedback that the answer appears typed/printed so handwriting could not be assessed.
+"""
+        json_schema = """Return STRICT JSON only (no prose, no markdown fences):
+
+{
+  "student_name": string,
+  "detected_language": string (primary language/script detected, e.g. "Telugu", "Hindi+English", "Bengali"),
+  "marks_awarded": number,
+  "marks_total": number,
+  "percentage": number,
+  "answer_formats_used": [string],
+  "per_question": [
+    { "q": string, "marks_awarded": number, "marks_total": number,
+       "feedback": string,
+       "format": "text"|"diagram"|"table"|"math"|"bullets"|"hinglish"|"mixed" }
+  ],
+  "mistakes": [
+    { "type": "conceptual"|"calculation"|"step_skipped"|"wrong_formula"|"spelling"|"language"|"blank", "description": string }
+  ],
+  "strengths": [string],
+  "suggestion": string,
+  "ai_cheat_suspicion": number (0-100),
+  "transcript": string (verbatim, page-by-page, line-by-line transcription of all text written by the student),
+  "cleaned_transcript": string (polished, corrected, highly readable version of the transcript above),
+  "steps": [
+    { "index": number, "text": string, "verdict": "correct"|"wrong"|"partial",
+       "comment": string,
+       "format": "text"|"diagram"|"table"|"math"|"bullets"|"hinglish"|"mixed" }
+  ],
+  "first_mistake": null | { "step_index": number, "why": string, "correction": string },
+  "is_typed": boolean,
+  "handwriting_clarity": number,
+  "handwriting_analysis": {
+    "clarity_score": number,
+    "alignment": "good"|"wandering"|"poor",
+    "spacing": "good"|"uneven"|"cramped",
+    "readability_comment": string
+  },
+  "grammar_spelling": {
+    "grammar_score": number,
+    "spelling_score": number,
+    "errors": [
+      { "original": string, "correction": string, "type": "spelling"|"grammar", "explanation": string }
+    ]
+  },
+  "visual_elements": {
+    "graphs": { "detected": boolean, "correctness_score": number | null, "comment": string },
+    "diagrams": { "detected": boolean, "correctness_score": number | null, "comment": string },
+    "sketches": { "detected": boolean, "correctness_score": number | null, "comment": string },
+    "arrows": { "detected": boolean, "correctness_score": number | null, "comment": string },
+    "maps": { "detected": boolean, "correctness_score": number | null, "comment": string },
+    "dots": { "detected": boolean, "correctness_score": number | null, "comment": string },
+    "tables": { "detected": boolean, "correctness_score": number | null, "comment": string },
+    "shapes": { "detected": boolean, "correctness_score": number | null, "comment": string }
+  },
+  "homework_completeness": {
+    "score": number (0-100),
+    "status": "complete"|"incomplete"|"partial",
+    "missing_parts_comment": string
+  },
+  "category_scores": {
+    "handwriting_quality": number (0-100),
+    "grammar_and_spelling": number (0-100),
+    "math_and_equations": number (0-100),
+    "diagrams_and_visuals": number (0-100),
+    "completeness": number (0-100)
+  },
+  "effort_score": number (0-100)
+}"""
+    else:
+        handwriting_guidelines = ""
+        json_schema = """Return STRICT JSON only (no prose, no markdown fences):
+
+{{
+  \"student_name\": string,
+  \"detected_language\": string (primary language/script detected, e.g. \"Telugu\", \"Hindi+English\", \"Bengali\"),
+  \"marks_awarded\": number,
+  \"marks_total\": number,
+  \"percentage\": number,
+  \"answer_formats_used\": [string],
+  \"per_question\": [
+    {{ \"q\": string, \"marks_awarded\": number, \"marks_total\": number,
+       \"feedback\": string,
+       \"format\": \"text\"|\"diagram\"|\"table\"|\"math\"|\"bullets\"|\"hinglish\"|\"mixed\" }}
+  ],
+  \"mistakes\": [
+    {{ \"type\": \"conceptual\"|\"calculation\"|\"step_skipped\"|\"wrong_formula\"|\"spelling\"|\"language\"|\"blank\", \"description\": string }}
+  ],
+  \"strengths\": [string],
+  \"suggestion\": string,
+  \"ai_cheat_suspicion\": number (0-100)
+}}"""
+
+    return f"""{exam_block}You are a Grade {grade} {subject} examiner grading the chapter \
 \"{chapter}\".
 
 CRITICAL DIRECTIVES:
-1. PROCESS THE TEACHER'S ANSWER KEY & RUBRIC ONLY:
-   - You MUST evaluate and grade the student's answers strictly and solely based on the Marking Rubric/Solution Key provided by the teacher below. Do NOT use your own external assumptions or custom criteria.
-   - Do NOT generate or assume ideal answers. Do NOT invent rubric points. Never create your own answer format. Follow only the teacher-provided answer key and marking instructions.
+1. PROCESS THE TEACHER'S UPLOADED ANSWER KEY & RUBRIC ONLY:
+   - You MUST evaluate and grade the student's answers strictly and solely based on the Marking Rubric/Solution Key uploaded by the teacher below. Do NOT use your own external assumptions, general book knowledge, or default standards.
+   - Note: The teacher's answer key/rubric is uploaded in Markdown (.md) format. Carefully parse the Markdown headers, bold titles, bullet points, step descriptions, and sub-marks allocations to perform step-wise grading.
+   - Do NOT generate or assume ideal answers. Follow ONLY the teacher-provided answer key and marking instructions. This is the sole authority for grading.
 
 2. STRICT EVALUATION:
    - Do not infer missing information. Do not assume alternative answers unless explicitly provided in the teacher's marking scheme.
@@ -211,17 +454,20 @@ CRITICAL DIRECTIVES:
    - Base feedback only on the teacher's rubric and student response. Do NOT generate generic AI feedback.
    - Mention missing or incorrect steps using grade-appropriate language.
 
-7. CONCISE FEEDBACK:
-   - Keep the `feedback` for every question in `per_question` extremely brief (MAXIMUM 15 words). Focus only on the main reason for correct/incorrect marks.
-   - Keep all `mistakes` descriptions and the overall `suggestion` short and concise (under 25 words).
+7. DETAILED & SPECIFIC FEEDBACK (DONE/MISSING FORMAT):
+   - For every question in `per_question`, provide a clear, proper, and specific step-by-step breakdown in the `feedback` field.
+   - You MUST format the feedback string exactly using this structure to show which part of the process was completed by the student and which part was not:
+     "Done: [Briefly describe the correct steps, formulas, or value points completed by the student] | Missing/Incorrect: [Briefly describe the specific steps, calculations, or value points from the teacher's rubric that the student omitted or got wrong]"
+   - If the student got full marks, write: "Done: All steps completed correctly | Missing/Incorrect: None"
+   - Do NOT output vague, unhelpful feedback such as "Correct", "Partially correct", "Incorrect", or "Incorrect option". You must explicitly show what was done and what was not.
+   - Keep all `mistakes` descriptions and the overall `suggestion` helpful, actionable, and clear.
 
 8. FEEDBACK LANGUAGE:
    - Write all feedback, suggestions, mistake descriptions, and overall suggestions in the language of the subject being examined (e.g. write in Hindi for a Hindi paper, and write in English for English/Science/Maths).
    - CRITICAL: When writing in Hindi (Devanagari) or any other regional language, ignore English-specific constraints (such as "no more than 6 letters" or specific English word bounds). Write in natural, grammatically correct, and fluent Hindi suited for the student's grade level. Avoid literal translations from English structure (e.g., never write "हो है" - use correct phrasing like "होता है", "होना चाहिए", or "है").
 
-TONE RULES (must follow strictly for all feedback/suggestions/mistakes):
-{tone}{ctx}
-
+{tone_rules_block}
+ 
 Marking rubric the teacher provided:
 \"\"\"
 {rubric}
@@ -255,11 +501,11 @@ PLAIN TEXT - grade normally.
 [BULLET POINTS] BULLET POINTS / NUMBERED LISTS - equivalent to prose.
     All expected points present -> full marks regardless of writing style.
 
-[LANGUAGE] ANY CBSE-APPROVED LANGUAGE (see full rules below) - grade conceptual content only.
+[LANGUAGE] ANY APPROVED LANGUAGE (see full rules below) - grade conceptual content only.
 
 [ABBREVIATIONS] ABBREVIATIONS / SHORTHAND - if the key facts are present, award full marks.
 
-[COMBINATION] COMBINATION ANSWERS (text + diagram + formula + bullets together):
+[CONTAINER] COMBINATION ANSWERS (text + diagram + formula + bullets together):
     - Shows deeper understanding. Award full marks if the concept is demonstrated.
     - Do NOT double-penalise when the student used multiple formats.
 
@@ -270,7 +516,7 @@ PLAIN TEXT - grade normally.
 GENERAL EVALUATION RULES
 --------------------------------------------------
   - VALUE POINTS: Look for key terms (value points) in the student's answer. If the core concepts (value points) from the rubric are present, award full credit regardless of sentence structure.
-  - NO SPELLING/GRAMMAR PENALTY (Non-Language Subjects): If the subject is NOT a language paper (language papers are subjects like English, Hindi, Sanskrit, Bengali, Telugu, Marathi, Tamil, Gujarati, Kannada, Urdu, Malayalam, etc. that test grammar/literature), you must NOT deduct any marks for spelling mistakes, grammatical errors, or poor sentence structure. For all other subjects (like Science, Mathematics, Physics, Chemistry, Biology, Social Science, History, Geography, Civics, Economics, Computer Science, etc.), grade solely based on conceptual understanding and correct value points.
+  - NO SPELLING/GRAMMAR PENALTY (Non-Language Subjects): If the subject is NOT a language paper, you must NOT deduct any marks for spelling mistakes, grammatical errors, or poor sentence structure. Grade solely based on conceptual understanding.
   - Grade strictly and solely against the teacher's provided answer key and rubric. Do not evaluate against external standards or books.
 
 🚫 ANTI-HALLUCINATION RULES:
@@ -278,53 +524,11 @@ GENERAL EVALUATION RULES
     and mistake type "blank" with description "Question not attempted."
   - Do NOT reference unrelated subjects.
 
-Return STRICT JSON only (no prose, no markdown fences):
+{handwriting_guidelines}
 
-{{
-  \"student_name\": string,
-  \"detected_language\": string (primary language/script detected, e.g. \"Telugu\", \"Hindi+English\", \"Bengali\"),
-  \"marks_awarded\": number,
-  \"marks_total\": number,
-  \"percentage\": number,
-  \"answer_formats_used\": [string],
-  \"per_question\": [
-    {{ \"q\": string, \"marks_awarded\": number, \"marks_total\": number,
-       \"feedback\": string,
-       \"format\": \"text\"|\"diagram\"|\"table\"|\"math\"|\"bullets\"|\"hinglish\"|\"mixed\" }}
-  ],
-  \"mistakes\": [
-    {{ \"type\": \"conceptual\"|\"calculation\"|\"step_skipped\"|\"wrong_formula\"|\"spelling\"|\"language\"|\"blank\", \"description\": string }}
-  ],
-  \"strengths\": [string],
-  \"suggestion\": string,
-  \"ai_cheat_suspicion\": number (0-100)
-}}
+{json_schema}
 
 Be honest but kind. If the answer is blank, give 0 and a short note."""
 
 
-def ncert_validate_prompt(grade: int, subject: str, chapter: str) -> str:
-    """Prompt for the standalone NCERT content validation call."""
-    return f"""You are a CBSE curriculum expert with complete knowledge of NCERT textbooks.
 
-Check whether this student answer sheet is based on NCERT Grade {grade} {subject} \
-curriculum (chapter: \"{chapter}\").
-
-For EACH question answer you see, decide:
-  1. Is the question type from NCERT/CBSE exam pattern for this grade/subject? (yes/no)
-  2. Is the student's answer content aligned with what NCERT books say? (yes/partial/no)
-  3. Is anything in the answer factually wrong compared to NCERT? (describe briefly)
-
-Return STRICT JSON only:
-{{
-  "is_ncert_paper": true|false,
-  "ncert_alignment_score": number (0-100, how well answers match NCERT content),
-  "syllabus_match": "full"|"partial"|"none",
-  "questions_from_ncert": number (count of questions that follow NCERT/CBSE pattern),
-  "questions_outside_ncert": number,
-  "non_ncert_topics": [string] (topics asked that are NOT in NCERT syllabus for this grade),
-  "ncert_issues": [
-    {{ "question": string, "issue": string, "ncert_says": string }}
-  ],
-  "overall_comment": string (one sentence summary)
-}}"""

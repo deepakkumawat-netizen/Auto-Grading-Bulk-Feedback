@@ -24,8 +24,9 @@ export default function Grader({ onHome }) {
   const [files, setFiles]           = useState([])
   const [verify, setVerify]               = useState(false)
   const [studyPlan, setStudyPlan]         = useState(false)
+  const [handwritingAudit, setHandwritingAudit] = useState(false)
   const [totalMarks, setTotalMarks]       = useState('')
-  const [examConfig, setExamConfig]       = useState({})
+  const [examConfig, setExamConfig]       = useState({ grade: 10, subject: 'Science' })
   const [health, setHealth] = useState(null)
   const [progress, setProgress] = useState(null)
 
@@ -56,6 +57,9 @@ export default function Grader({ onHome }) {
       const fd = new FormData()
       fd.append('paper', paperFile, paperFile.name)
       fd.append('solution', solutionFile, solutionFile.name)
+      const sessId = Math.random().toString(36).substring(7) + Date.now().toString(36)
+      fd.append('session_id', sessId)
+
       const r = await fetch('/api/rubric/from-paper', { method: 'POST', body: fd })
       if (!r.ok) {
         const txt = await r.text()
@@ -75,19 +79,34 @@ export default function Grader({ onHome }) {
         } catch (e) {}
         throw new Error(errMsg)
       }
-      const data = await r.json()
+      const initData = await r.json()
 
-      // ── CRITICAL FIX ──────────────────────────────────────────────────────
-      // If the backend returned an empty rubric, block grading immediately.
-      // Without this check the AI grades with NO rubric and invents its own
-      // marks/responses completely disconnected from the question paper.
+      let data = initData
+      if (initData.status === 'started') {
+        const targetSessId = initData.session_id || sessId
+        while (true) {
+          await new Promise(resolve => setTimeout(resolve, 2000))
+          const pr = await fetch(`/api/rubric/progress/${targetSessId}`)
+          if (!pr.ok) throw new Error(`Rubric progress check failed: HTTP ${pr.status}`)
+          const pData = await pr.json()
+
+          if (pData.status === 'completed') {
+            const resR = await fetch(`/api/rubric/results/${targetSessId}`)
+            if (!resR.ok) throw new Error(`Failed to fetch rubric results: HTTP ${resR.status}`)
+            data = await resR.json()
+            break
+          } else if (pData.status === 'failed') {
+            throw new Error(pData.error || 'Rubric generation failed in background.')
+          }
+        }
+      }
+
       if (!data.rubric || !data.rubric.trim()) {
         throw new Error(
           'The question paper was read but no questions/marks could be extracted. ' +
           'Make sure the file contains a real CBSE question paper with question numbers and marks.'
         )
       }
-      // ──────────────────────────────────────────────────────────────────────
 
       setRubric(data.rubric)
       setPaperMeta({
@@ -95,7 +114,6 @@ export default function Grader({ onHome }) {
         total_marks:     data.total_marks,
         paper_board:     data.paper_board,
       })
-      // Auto-fill ExamConfigPanel with board/total_marks read from the question paper header
       if (data.paper_board || data.total_marks) {
         setExamConfig(prev => ({
           ...prev,
@@ -113,7 +131,6 @@ export default function Grader({ onHome }) {
         body:  `${data.questions_found} question${data.questions_found === 1 ? '' : 's'} found · ${data.total_marks} marks${metaHints ? ` · ${metaHints}` : ''}`,
       })
     } catch (e) {
-      // Clear rubric on failure so grading is blocked (canSubmit requires rubric)
       setRubric('')
       setPaperMeta(null)
       push({ kind: 'error', title: 'Rubric generation failed', body: String(e.message || e) })
@@ -136,6 +153,7 @@ export default function Grader({ onHome }) {
     fd.append('total_marks', String(parseInt(totalMarks) || 0))
     fd.append('grade_override', String(examConfig.grade || 0))
     fd.append('subject_override', String(examConfig.subject || ''))
+    fd.append('handwriting_audit', String(handwritingAudit))
     if (sessionId) {
       fd.append('session_id', sessionId)
     }
@@ -145,7 +163,27 @@ export default function Grader({ onHome }) {
     files.forEach(f => fd.append('files', f, f.name))
     const r = await fetch('/api/grade/bulk', { method: 'POST', body: fd, signal })
     if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`)
-    return r.json()
+    const initData = await r.json()
+
+    if (initData.status === 'started') {
+      const sessId = initData.session_id || sessionId
+      while (true) {
+        if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+        await new Promise(resolve => setTimeout(resolve, 2000))
+        
+        const pr = await fetch(`/api/grade/progress/${sessId}`, { signal })
+        if (!pr.ok) throw new Error(`Progress check failed: HTTP ${pr.status}`)
+        const pData = await pr.json()
+        
+        const isDone = pData.completed + pData.failed === pData.total
+        if (isDone && pData.total > 0) {
+          const resR = await fetch(`/api/grade/results/${sessId}`, { signal })
+          if (!resR.ok) throw new Error(`Failed to fetch final results: HTTP ${resR.status}`)
+          return resR.json()
+        }
+      }
+    }
+    return initData
   })
 
   // Keyboard shortcut: Cmd/Ctrl + Enter submits
@@ -156,7 +194,7 @@ export default function Grader({ onHome }) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [files, rubric, verify, bulk.loading])
+  }, [files, rubric, verify, handwritingAudit, bulk.loading])
 
   const submit = async () => {
     if (!files.length) { push({ kind: 'error', title: 'Add answer sheets', body: 'Drop a few files first.' }); return }
@@ -308,7 +346,7 @@ export default function Grader({ onHome }) {
       <header className="app-bar">
         <button className="brand" onClick={onHome}>
           <span className="brand-mark">📝</span>
-          <span className="brand-name">Auto-Grading &amp; Bulk Feedback</span>
+          <span className="brand-name">Auto Grade</span>
         </button>
         <div className="app-bar-right">
           <span className="muted">AI grades against a rubric · Powered By Codevidhya</span>
@@ -428,6 +466,14 @@ export default function Grader({ onHome }) {
               </div>
             </label>
             <label className="verify-toggle">
+              <input type="checkbox" checked={handwritingAudit}
+                     onChange={e => setHandwritingAudit(e.target.checked)} disabled={bulk.loading}/>
+              <div>
+                <div className="vt-title">✍️ Handwriting &amp; Quality Audit <span className="vt-speed">Vision AI</span></div>
+                <div className="vt-sub">Checks handwriting clarity, grammar/spelling errors, effort score, and visual checklist.</div>
+              </div>
+            </label>
+            <label className="verify-toggle">
               <input type="checkbox" checked={studyPlan}
                      onChange={e => setStudyPlan(e.target.checked)} disabled={bulk.loading}/>
               <div>
@@ -460,7 +506,9 @@ export default function Grader({ onHome }) {
                         onChange={e => setExamConfig(prev => ({ ...prev, grade: parseInt(e.target.value) || "" }))}
                         disabled={bulk.loading}>
                   <option value="">Select Grade</option>
-                  <option value="10">Grade 10</option>
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(g => (
+                    <option key={g} value={g}>Grade {g}</option>
+                  ))}
                 </select>
               </div>
               <div className="override-field">
@@ -605,6 +653,7 @@ export default function Grader({ onHome }) {
                   <tr>
                     <th aria-label="expand" style={{width: 28}}></th>
                     <th>File</th><th>Student</th><th>Detected</th><th>Marks</th><th>%</th>
+                    {handwritingAudit && <th>Clarity</th>}
                     <th>Verifier</th><th>Top mistake</th><th>PDF</th>
                   </tr>
                 </thead>
@@ -636,6 +685,23 @@ export default function Grader({ onHome }) {
                           </td>
                           <td>{r.ok ? `${r.percentage}%` : ''}</td>
 
+                          {handwritingAudit && (
+                            <td>
+                              {r.ok ? (
+                                r.is_typed ? (
+                                  <span className="rc-typed" style={{ fontSize: '11px', background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: '4px', whiteSpace: 'nowrap' }}>⌨️ Typed</span>
+                                ) : (
+                                  <span className="rc-stars" style={{ color: '#eab308', whiteSpace: 'nowrap' }}>
+                                    {'★'.repeat(r.handwriting_clarity ?? 0)}
+                                    <span style={{ opacity: 0.25 }}>
+                                      {'★'.repeat(5 - (r.handwriting_clarity ?? 0))}
+                                    </span>
+                                  </span>
+                                )
+                              ) : '—'}
+                            </td>
+                          )}
+
                           <td>{r.verifier
                                 ? (r.verifier.agrees ? `✓ ${r.verifier.confidence ?? ''}%` : `⚠ suggests ${r.verifier.suggested_marks}`)
                                 : ''}</td>
@@ -658,7 +724,7 @@ export default function Grader({ onHome }) {
                         </tr>
                         {isOpen && r.ok && (
                           <tr className="row-feedback">
-                            <td colSpan={9}>
+                            <td colSpan={handwritingAudit ? 10 : 9}>
                               <FeedbackPanel result={r}
                                              onDownloadTranscript={() => downloadOneTranscript(r)} />
                             </td>
@@ -705,6 +771,19 @@ function FeedbackPanel({ result, onDownloadTranscript }) {
   const sp  = result.study_plan
   const tx  = result.extracted_text
   const pf  = result.pre_flight
+
+  const stars = result.handwriting_clarity ?? 0
+  const isTyped = result.is_typed
+  const effortScore = result.effort_score
+  const categoryScores = result.category_scores
+  const handwritingAnalysis = result.handwriting_analysis
+  const grammarSpelling = result.grammar_spelling
+  const visualElements = result.visual_elements
+  const homeworkCompleteness = result.homework_completeness
+  const steps = result.steps
+  const firstMistake = result.first_mistake
+  const cleanedTranscript = result.cleaned_transcript
+
   return (
     <div className="feedback-panel stagger-in">
       {pf && (pf.warnings?.length > 0 || pf.info?.length > 0) && (
@@ -718,10 +797,199 @@ function FeedbackPanel({ result, onDownloadTranscript }) {
           ))}
         </div>
       )}
+
+      {/* 💪 Effort meter */}
+      {typeof effortScore === 'number' && (
+        <div className="effort-row" style={{
+          display: 'flex', alignItems: 'center', gap: '12px',
+          background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
+          padding: '12px', borderRadius: '8px', marginBottom: '14px'
+        }}>
+          <div className="effort-label" style={{ fontWeight: 600, fontSize: '13px' }}>💪 Effort score</div>
+          <div className="effort-bar-bg" style={{ flex: 1, height: '8px', background: 'rgba(255,255,255,0.1)', borderRadius: '9999px', overflow: 'hidden' }}>
+            <div className="effort-bar-fill"
+                 style={{
+                   height: '100%',
+                   background: 'linear-gradient(90deg, #3b82f6, #8b5cf6)',
+                   width: `${Math.max(0, Math.min(100, effortScore))}%`
+                 }} />
+          </div>
+          <div className="effort-pct" style={{ fontWeight: 700, fontSize: '13px' }}>{effortScore}%</div>
+        </div>
+      )}
+
       {result.suggestion && (
         <div className="fp-block fp-suggestion">
           <div className="fp-label">💡 Suggestion for the student</div>
           <p>{result.suggestion}</p>
+        </div>
+      )}
+
+      {/* 📊 Teacher Diagnostic Dashboard */}
+      {(categoryScores || handwritingAnalysis || grammarSpelling || visualElements || homeworkCompleteness) && (
+        <div className="srd-dashboard-card" style={{ marginBottom: '16px' }}>
+          <h4 className="srd-dashboard-title">📊 Teacher Diagnostic Dashboard</h4>
+          
+          {/* Category-wise Scores */}
+          {categoryScores && (
+            <div className="srd-category-scores">
+              <div className="srd-score-tile">
+                <div className="tile-icon">✍️</div>
+                <div className="tile-label">Handwriting</div>
+                <div className="tile-score">{categoryScores.handwriting_quality}%</div>
+                <div className="tile-progress-bg">
+                  <div className="tile-progress-fill hw" style={{ width: `${categoryScores.handwriting_quality}%` }} />
+                </div>
+              </div>
+              <div className="srd-score-tile">
+                <div className="tile-icon">🗣️</div>
+                <div className="tile-label">Grammar &amp; Spell</div>
+                <div className="tile-score">{categoryScores.grammar_and_spelling}%</div>
+                <div className="tile-progress-bg">
+                  <div className="tile-progress-fill gs" style={{ width: `${categoryScores.grammar_and_spelling}%` }} />
+                </div>
+              </div>
+              <div className="srd-score-tile">
+                <div className="tile-icon">🔢</div>
+                <div className="tile-label">Math &amp; Eq</div>
+                <div className="tile-score">{categoryScores.math_and_equations}%</div>
+                <div className="tile-progress-bg">
+                  <div className="tile-progress-fill math" style={{ width: `${categoryScores.math_and_equations}%` }} />
+                </div>
+              </div>
+              <div className="srd-score-tile">
+                <div className="tile-icon">🖼️</div>
+                <div className="tile-label">Visuals/Diagrams</div>
+                <div className="tile-score">{categoryScores.diagrams_and_visuals}%</div>
+                <div className="tile-progress-bg">
+                  <div className="tile-progress-fill vis" style={{ width: `${categoryScores.diagrams_and_visuals}%` }} />
+                </div>
+              </div>
+              <div className="srd-score-tile">
+                <div className="tile-icon">✅</div>
+                <div className="tile-label">Completeness</div>
+                <div className="tile-score">{categoryScores.completeness}%</div>
+                <div className="tile-progress-bg">
+                  <div className="tile-progress-fill comp" style={{ width: `${categoryScores.completeness}%` }} />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Handwriting Analysis */}
+          {!isTyped && handwritingAnalysis && (
+            <div className="srd-section">
+              <h5 className="srd-sec-title">✍️ Handwriting Analysis Details</h5>
+              <div className="srd-hw-details">
+                <div className="srd-hw-metric">
+                  <strong>Clarity Rating:</strong> {handwritingAnalysis.clarity_score}/5
+                </div>
+                <div className="srd-hw-metric">
+                  <strong>Baseline Alignment:</strong> <span className={`srd-status-${handwritingAnalysis.alignment}`}>{handwritingAnalysis.alignment}</span>
+                </div>
+                <div className="srd-hw-metric">
+                  <strong>Letter Spacing:</strong> <span className={`srd-status-${handwritingAnalysis.spacing}`}>{handwritingAnalysis.spacing}</span>
+                </div>
+              </div>
+              {handwritingAnalysis.readability_comment && (
+                <p className="srd-hw-comment"><i>"{handwritingAnalysis.readability_comment}"</i></p>
+              )}
+            </div>
+          )}
+
+          {isTyped && (
+            <div className="srd-section">
+              <h5 className="srd-sec-title">✍️ Handwriting Analysis Details</h5>
+              <div className="srd-no-errors">⌨️ This student sheet is typed/printed. Handwriting clarity evaluation was skipped.</div>
+            </div>
+          )}
+
+          {/* Grammar & Spelling Check */}
+          {grammarSpelling && (
+            <div className="srd-section">
+              <h5 className="srd-sec-title">🗣️ Grammar &amp; Spelling Auditor</h5>
+              <div className="srd-gs-scores">
+                <span><strong>Grammar Score:</strong> {grammarSpelling.grammar_score}/100</span>
+                <span style={{ marginLeft: 20 }}><strong>Spelling Score:</strong> {grammarSpelling.spelling_score}/100</span>
+              </div>
+              {grammarSpelling.errors && grammarSpelling.errors.length > 0 ? (
+                <div className="srd-table-wrapper">
+                  <table className="srd-error-table">
+                    <thead>
+                      <tr>
+                        <th>Original</th>
+                        <th>Correction</th>
+                        <th>Type</th>
+                        <th>Explanation</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {grammarSpelling.errors.map((err, errIdx) => (
+                        <tr key={errIdx}>
+                          <td className="srd-err-orig">{err.original}</td>
+                          <td className="srd-err-corr">{err.correction}</td>
+                          <td><span className={`srd-err-type ${err.type}`}>{err.type}</span></td>
+                          <td className="srd-err-expl">{err.explanation}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="srd-no-errors">🎉 No grammar or spelling errors detected!</div>
+              )}
+            </div>
+          )}
+
+          {/* Visual Elements Checklist */}
+          {visualElements && (
+            <div className="srd-section">
+              <h5 className="srd-sec-title">🖼️ Visual &amp; Drawing Elements Evaluation</h5>
+              <div className="srd-visual-grid">
+                {Object.entries(visualElements).map(([elName, elData]) => {
+                  if (!elData) return null;
+                  return (
+                    <div key={elName} className={`srd-visual-card ${elData.detected ? 'detected' : 'not-detected'}`}>
+                      <div className="srd-visual-card-header">
+                        <span className="srd-visual-icon">
+                          {elName === 'graphs' && '📊'}
+                          {elName === 'diagrams' && '🖼️'}
+                          {elName === 'sketches' && '✏️'}
+                          {elName === 'arrows' && '➡️'}
+                          {elName === 'maps' && '🗺️'}
+                          {elName === 'dots' && '⚫'}
+                          {elName === 'tables' && '📋'}
+                          {elName === 'shapes' && '⬡'}
+                        </span>
+                        <span className="srd-visual-name">{elName.charAt(0).toUpperCase() + elName.slice(1)}</span>
+                        <span className={`srd-visual-badge ${elData.detected ? 'detected' : 'not-detected'}`}>
+                          {elData.detected ? `Detected (${elData.correctness_score}%)` : 'Not Detected'}
+                        </span>
+                      </div>
+                      {elData.detected && elData.comment && (
+                        <div className="srd-visual-comment">{elData.comment}</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Homework Completeness */}
+          {homeworkCompleteness && (
+            <div className="srd-section" style={{ borderBottom: 'none' }}>
+              <h5 className="srd-sec-title">✅ Homework Completeness Audit</h5>
+              <div className="srd-completeness-row">
+                <span className={`srd-complete-badge status-${homeworkCompleteness.status}`}>
+                  {homeworkCompleteness.status.toUpperCase()} ({homeworkCompleteness.score}%)
+                </span>
+                {homeworkCompleteness.missing_parts_comment && (
+                  <span className="srd-complete-comment" style={{ marginLeft: 12 }}>{homeworkCompleteness.missing_parts_comment}</span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -747,6 +1015,57 @@ function FeedbackPanel({ result, onDownloadTranscript }) {
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {/* Root mistake card */}
+      {firstMistake && (
+        <div className="first-mistake-card" style={{
+          background: 'rgba(239, 68, 68, 0.05)',
+          border: '1px solid rgba(239, 68, 68, 0.2)',
+          padding: '16px',
+          borderRadius: '8px',
+          marginBottom: '16px'
+        }}>
+          <div className="fm-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <span className="fm-pill" style={{ background: '#ef4444', color: '#fff', fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '4px' }}>🎯 ROOT MISTAKE</span>
+            <span className="fm-step" style={{ fontWeight: 600, fontSize: '13px' }}>Step {firstMistake.step_index}</span>
+          </div>
+          <div className="fm-explain" style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginBottom: '8px' }}>
+            This is the <b>first step where the student went wrong</b>. Every later step is affected.
+          </div>
+          <div className="fm-why" style={{ fontSize: '13px', marginBottom: '4px' }}><b>Why it's wrong:</b> {firstMistake.why}</div>
+          <div className="fm-fix" style={{ fontSize: '13px' }}><b>How to fix it:</b> {firstMistake.correction}</div>
+        </div>
+      )}
+
+      {/* Step by step list */}
+      {steps && steps.length > 0 && (
+        <div className="fp-block">
+          <div className="fp-label">📋 Step-by-Step Logic Validation</div>
+          <div className="steps-list" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
+            {steps.map((s, i) => {
+              let color = 'rgba(255,255,255,0.3)';
+              let icon = '·';
+              if (s.verdict === 'correct') { color = '#10b981'; icon = '✓'; }
+              else if (s.verdict === 'wrong') { color = '#ef4444'; icon = '✗'; }
+              else if (s.verdict === 'partial') { color = '#eab308'; icon = '⚠'; }
+              
+              return (
+                <div key={i} style={{
+                  display: 'flex', gap: '12px', padding: '8px 12px',
+                  borderRadius: '6px', background: 'rgba(255,255,255,0.02)',
+                  borderLeft: `3px solid ${color}`
+                }}>
+                  <div style={{ fontWeight: 700, color }}>{icon}</div>
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 500 }}>{s.text}</div>
+                    {s.comment && <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', marginTop: '2px' }}>{s.comment}</div>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -816,6 +1135,22 @@ function FeedbackPanel({ result, onDownloadTranscript }) {
           <div className="fp-label">🔍 Verifier note · suggests {v.suggested_marks}/{result.marks_total}</div>
           <p>{v.comment}</p>
         </div>
+      )}
+
+      {/* Polished transcript details */}
+      {cleanedTranscript && (
+        <details className="fp-transcript" style={{ marginBottom: 12 }}>
+          <summary style={{ cursor: 'pointer', fontWeight: 600 }}>✨ Cleaned &amp; Readable Transcript (Recommended)</summary>
+          <div className="transcript-toolbar" style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
+            <button className="btn btn-sm" onClick={() => {
+              const name = (result.student_name || result.file || 'student').replace(/[^a-z0-9 _-]/gi, '')
+              const blob = new Blob([cleanedTranscript], { type: 'text/markdown;charset=utf-8' })
+              triggerDownload(blob, `${name}_cleaned.md`)
+            }}>⬇️ Download .md</button>
+            <button className="btn btn-sm" onClick={() => navigator.clipboard?.writeText(cleanedTranscript)}>📋 Copy</button>
+          </div>
+          <pre className="transcript" style={{ whiteSpace: 'pre-wrap' }}>{cleanedTranscript}</pre>
+        </details>
       )}
 
       {/* 📝 Extracted transcript — what the AI actually read from the sheet */}
