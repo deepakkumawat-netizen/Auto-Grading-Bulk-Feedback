@@ -178,8 +178,17 @@ export default function Grader({ onHome }) {
         
         const isDone = pData.completed + pData.failed === pData.total
         if (isDone && pData.total > 0) {
-          const resR = await fetch(`/api/grade/results/${sessId}`, { signal })
-          if (!resR.ok) throw new Error(`Failed to fetch final results: HTTP ${resR.status}`)
+          let resR = null
+          for (let attempt = 0; attempt < 6; attempt++) {
+            resR = await fetch(`/api/grade/results/${sessId}`, { signal })
+            if (resR.ok) break
+            if (resR.status === 404 && attempt < 5) {
+              await new Promise(resolve => setTimeout(resolve, 1500))
+            } else {
+              break
+            }
+          }
+          if (!resR || !resR.ok) throw new Error(`Failed to fetch final results: HTTP ${resR?.status}`)
           return resR.json()
         }
       }
