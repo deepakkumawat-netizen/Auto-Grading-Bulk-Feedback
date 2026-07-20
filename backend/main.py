@@ -456,19 +456,9 @@ def _extract_question_paper_unified(raw: bytes, max_pages: int = 40, dpi: int = 
         if result and len(result.strip()) >= 50:
             print(f"[vision/qpaper] Gemini extracted {len(result)} chars")
             return result
-    except QuotaExceeded:
-        print("[vision/qpaper] Gemini quota exhausted - falling back to Groq")
     except Exception as e:
-        print(f"[vision/qpaper] Gemini failed ({e}) - falling back to Groq")
-
-    try:
-        result = _try_groq_chunked(image_blobs, prompt)
-        if result and len(result.strip()) >= 50:
-            print(f"[vision/qpaper] Groq extracted {len(result)} chars")
-            return result
-    except Exception as e:
-        print(f"[vision/qpaper] Groq also failed: {e}")
-        raise
+        print(f"[vision/qpaper] Gemini failed ({e})")
+        raise e
 
     return ""
 
@@ -496,20 +486,9 @@ def _extract_solved_paper_unified(raw: bytes, max_pages: int = 40, dpi: int = 11
         if result and len(result.strip()) > 100:
             print(f"[vision] Gemini extracted result ({len(result)} chars)")
             return result
-    except QuotaExceeded:
-        print("[vision] Gemini quota exhausted - falling back to Groq Llama 4 Scout vision")
     except Exception as e:
-        print(f"[vision] Gemini failed ({e}) - falling back to Groq")
-
-    # Fallback: Groq Llama 4 Scout vision
-    try:
-        result = _try_groq_chunked(image_blobs, prompt)
-        if result and len(result.strip()) > 100:
-            print(f"[vision] Groq fallback extracted result ({len(result)} chars)")
-            return result
-    except Exception as e:
-        print(f"[vision] Groq fallback also failed: {e}")
-        raise RuntimeError(f"Both Gemini and Groq vision failed. Last error: {e}")
+        print(f"[vision] Gemini failed ({e})")
+        raise RuntimeError(f"Gemini vision failed: {e}")
 
     return ""
 

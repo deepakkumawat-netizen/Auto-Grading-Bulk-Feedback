@@ -107,14 +107,10 @@ def _block_groq_model(model_name: str):
 def _groq_chat_with_retry(model: str, messages, *, max_tokens: int,
                            temperature: float = 0.2,
                            response_format=None) -> str:
-    """Run a Groq chat completion. On 429 rate-limit:
-      - Retry up to 3× on the SAME (smartest) model using the exact wait time
-        Groq returns in its error message
-      - Fall through to other Groq models as a LAST resort (smaller models
-        over-count Board marks — verify rubric carefully when this happens)
-      - If ALL Groq models fail → fall back to Gemini 2.5 Flash (separate quota)"""
-    chain = [model] + [m for m in _GROQ_TEXT_CHAIN if m != model]
-    seen = set(); chain = [m for m in chain if not (m in seen or seen.add(m))]
+    # Route all requests to Gemini exclusively
+    return _gemini_text_fallback(messages, max_tokens=max_tokens,
+                                  temperature=temperature,
+                                  response_format=response_format)
     
     # Filter out blocked models unless all are blocked
     active_chain = [m for m in chain if not _is_groq_model_blocked(m)]
@@ -1543,15 +1539,10 @@ _GEMINI_FALLBACK_CHAIN = [
 _gemini_quota_blocked_until = 0.0
 
 def _is_gemini_blocked() -> bool:
-    global _gemini_quota_blocked_until
-    import time
-    return time.time() < _gemini_quota_blocked_until
+    return False
 
 def _block_gemini():
-    global _gemini_quota_blocked_until
-    import time
-    _gemini_quota_blocked_until = time.time() + 1800  # Block Gemini for 30 minutes
-    print("[gemini] Quota exhausted (429). Disabling Gemini for the next 30 minutes to save quota and speed up fallback.")
+    pass
 
 def _gemini_model_chain() -> list[str]:
     if _is_gemini_blocked():
@@ -1777,11 +1768,7 @@ def _grade_with_groq_vision_fallback(system_prompt: str,
 
 def grade_handwriting(system_prompt: str,
                       images: list[tuple[bytes, str]]) -> dict[str, Any]:
-    """Evaluate a handwritten answer with retries + fallback model chain.
-
-    Tries primary model with 2 retries (2s, 4s). If still overloaded, falls
-    through to the next model in the chain. Quota errors (429) surface immediately.
-    """
+    """Evaluate a handwritten answer using Gemini exclusively."""
     if not images:
         raise ValueError("No images provided")
 
@@ -1791,50 +1778,17 @@ def grade_handwriting(system_prompt: str,
     parts.append(system_prompt)
 
     last_err = None
-    quota_hit = False
-    skip_gemini = _is_gemini_blocked()
-    if skip_gemini:
-        print(f"[gemini] quota block active — skipping straight to Groq")
-        
-    for model in (() if skip_gemini else _gemini_model_chain()):
+    for model in _gemini_model_chain():
         try:
             ok, result = _try_gemini_vision_model(model, parts)
-        except QuotaExceeded as e:
-            quota_hit = True
+            if ok:
+                if model != _gemini_model_chain()[0]:
+                    if isinstance(result, dict):
+                        result["_fallback_model_used"] = model
+                return result
+            last_err = result
+        except Exception as e:
             last_err = e
-            break
-        if ok:
-            if model != _gemini_model_chain()[0]:
-                if isinstance(result, dict):
-                    result["_fallback_model_used"] = model
-            return result
-        last_err = result
-        print(f"[gemini] falling through from {model} -> next in chain")
-
-    print(f"[gemini] {'skipped (quota block active)' if skip_gemini else ('quota exhausted' if quota_hit else 'all Gemini models failed')} — using Groq Llama-4-Scout vision")
-    groq_err = None
-    try:
-        result = _grade_with_groq_vision_fallback(system_prompt, images)
-        if isinstance(result, dict):
-            result["_fallback_model_used"] = os.getenv(
-                "GROQ_VISION_MODEL", "").strip() or "qwen/qwen3.6-27b"
-        return result
-    except Exception as e:
-        groq_err = e
-        print(f"[groq vision] failed ({e}) — trying Gemini one more time as final fallback")
-
-    # Final fallback: Gemini again (in case its quota cleared or earlier failure was transient).
-    try:
-        last_model = _gemini_model_chain()[-1]
-        ok, result = _try_gemini_vision_model(last_model, parts, retries=0)
-        if ok:
-            if isinstance(result, dict):
-                result["_fallback_model_used"] = f"{last_model} (retry after Groq failure)"
-            global _gemini_quota_blocked_until
-            _gemini_quota_blocked_until = 0.0  # clear circuit-breaker since it worked
-            return result
-        raise result if isinstance(result, Exception) else RuntimeError(str(result))
-    except Exception as ge:
-        raise RuntimeError(
-            f"All providers failed. Gemini: {last_err}. Groq vision: {groq_err}. Gemini retry: {ge}"
-        )
+            print(f"[gemini] model {model} failed with error ({e}), trying next model...")
+            continue
+    raise RuntimeError(f"All Gemini models failed: {last_err}")
