@@ -401,25 +401,25 @@ Step 12 - Write feedback. If is_typed = true, note in the feedback that the answ
         handwriting_guidelines = ""
         json_schema = """Return STRICT JSON only (no prose, no markdown fences):
 
-{{
-  \"student_name\": string,
-  \"detected_language\": string (primary language/script detected, e.g. \"Telugu\", \"Hindi+English\", \"Bengali\"),
-  \"marks_awarded\": number,
-  \"marks_total\": number,
-  \"percentage\": number,
-  \"answer_formats_used\": [string],
-  \"per_question\": [
-    {{ \"q\": string, \"marks_awarded\": number, \"marks_total\": number,
-       \"feedback\": string,
-       \"format\": \"text\"|\"diagram\"|\"table\"|\"math\"|\"bullets\"|\"hinglish\"|\"mixed\" }}
+{
+  "student_name": string,
+  "detected_language": string (primary language/script detected, e.g. "Telugu", "Hindi+English", "Bengali"),
+  "marks_awarded": number,
+  "marks_total": number,
+  "percentage": number,
+  "answer_formats_used": [string],
+  "per_question": [
+    { "q": string, "marks_awarded": number, "marks_total": number,
+       "feedback": string,
+       "format": "text"|"diagram"|"table"|"math"|"bullets"|"hinglish"|"mixed" }
   ],
-  \"mistakes\": [
-    {{ \"type\": \"conceptual\"|\"calculation\"|\"step_skipped\"|\"wrong_formula\"|\"spelling\"|\"language\"|\"blank\", \"description\": string }}
+  "mistakes": [
+    { "type": "conceptual"|"calculation"|"step_skipped"|"wrong_formula"|"spelling"|"language"|"blank", "description": string }
   ],
-  \"strengths\": [string],
-  \"suggestion\": string,
-  \"ai_cheat_suspicion\": number (0-100)
-}}"""
+  "strengths": [string],
+  "suggestion": string,
+  "ai_cheat_suspicion": number (0-100)
+}"""
 
     return f"""{exam_block}You are a Grade {grade} {subject} examiner grading the chapter \
 \"{chapter}\".
