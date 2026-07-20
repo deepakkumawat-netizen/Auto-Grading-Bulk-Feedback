@@ -6,6 +6,16 @@ pydantic>=2.10
 groq
 google-genai
 pypdf
+pypdfium2
 Pillow>=11
 aiofiles
 reportlab
+python-docx
+sympy
+textstat
+langgraph
+typing_extensions
+json_repair
+
+# Optional: only needed if GOOGLE_APPLICATION_CREDENTIALS is set for Cloud Vision OCR
+# google-cloud-vision

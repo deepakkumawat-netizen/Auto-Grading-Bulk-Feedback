@@ -47,8 +47,8 @@ export default function Grader({ onHome }) {
   const onGenerateRubric = async () => {
     const paperFile = paperFiles[0]
     const solutionFile = solutionFiles[0]
-    if (!paperFile || !solutionFile) {
-      push({ kind: 'error', title: 'Files missing', body: 'Please select both a question paper and a solution/answer key.' })
+    if (!paperFile) {
+      push({ kind: 'error', title: 'Question paper missing', body: 'Please select a question paper.' })
       return
     }
     setPaperBusy(true)
@@ -57,7 +57,7 @@ export default function Grader({ onHome }) {
     try {
       const fd = new FormData()
       fd.append('paper', paperFile, paperFile.name)
-      fd.append('solution', solutionFile, solutionFile.name)
+      if (solutionFile) fd.append('solution', solutionFile, solutionFile.name)
       const sessId = Math.random().toString(36).substring(7) + Date.now().toString(36)
       fd.append('session_id', sessId)
 
@@ -111,9 +111,10 @@ export default function Grader({ onHome }) {
 
       setRubric(data.rubric)
       setPaperMeta({
-        questions_found: data.questions_found,
-        total_marks:     data.total_marks,
-        paper_board:     data.paper_board,
+        questions_found:        data.questions_found,
+        total_marks:            data.total_marks,
+        paper_board:            data.paper_board,
+        auto_generated_answers: data.auto_generated_answers,
       })
       if (data.paper_board || data.total_marks) {
         setExamConfig(prev => ({
@@ -127,9 +128,13 @@ export default function Grader({ onHome }) {
         data.paper_board   || null,
       ].filter(Boolean).join(' · ')
       push({
-        kind:  'success',
-        title: '✨ Rubric generated successfully',
-        body:  `${data.questions_found} question${data.questions_found === 1 ? '' : 's'} found · ${data.total_marks} marks${metaHints ? ` · ${metaHints}` : ''}`,
+        kind:  data.auto_generated_answers ? 'info' : 'success',
+        title: data.auto_generated_answers
+          ? '🤖 Rubric generated — no answer key was provided'
+          : '✨ Rubric generated successfully',
+        body:  data.auto_generated_answers
+          ? `AI wrote the expected answers itself from the question paper alone — please review carefully before grading. ${data.questions_found} question${data.questions_found === 1 ? '' : 's'} found · ${data.total_marks} marks.`
+          : `${data.questions_found} question${data.questions_found === 1 ? '' : 's'} found · ${data.total_marks} marks${metaHints ? ` · ${metaHints}` : ''}`,
       })
     } catch (e) {
       setRubric('')
@@ -327,6 +332,31 @@ export default function Grader({ onHome }) {
     }
   }
 
+  const downloadRubricPdf = async () => {
+    if (!rubric.trim()) { push({ kind: 'error', title: 'Rubric missing', body: 'Type or generate a rubric first.' }); return }
+    try {
+      const r = await fetch('/api/rubric/pdf', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rubric,
+          meta: {
+            board:            examConfig.board,
+            grade:            examConfig.grade,
+            subject:          examConfig.subject,
+            chapter:          examConfig.chapter,
+            total_marks:      paperMeta?.total_marks || totalMarks || undefined,
+            questions_found:  paperMeta?.questions_found,
+          },
+        }),
+      })
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`)
+      triggerDownload(await r.blob(), 'rubric.pdf')
+      push({ kind: 'success', title: 'Rubric PDF downloaded' })
+    } catch (e) {
+      push({ kind: 'error', title: 'Rubric PDF download failed', body: String(e.message || e) })
+    }
+  }
+
   const [openRow, setOpenRow] = useState(null)
   const toggleRow = (i) => setOpenRow(prev => (prev === i ? null : i))
 
@@ -433,12 +463,12 @@ export default function Grader({ onHome }) {
                                   hint="AI will extract each question and detect marks." />
                     <FileDropzone value={solutionFiles} onChange={setSolutionFiles}
                                   accept=".pdf,.png,.jpg,.jpeg,.webp,.txt"
-                                  label="2. Solution Key / Answer Key (Required)"
-                                  hint="Provide key to ground correct steps & formulas." />
+                                  label="2. Solution Key / Answer Key (Optional)"
+                                  hint="Recommended — grounds correct steps & formulas. If omitted, AI writes the expected answers itself from the question paper." />
                   </div>
                   
                   <div style={{ marginBottom: '14px', display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <Button variant="primary" onClick={onGenerateRubric} disabled={paperBusy || !paperFiles.length || !solutionFiles.length} loading={paperBusy}>
+                    <Button variant="primary" onClick={onGenerateRubric} disabled={paperBusy || !paperFiles.length} loading={paperBusy}>
                       ✨ Generate Rubric from Paper & Solution Key
                     </Button>
                     {(paperFiles.length > 0 || solutionFiles.length > 0) && (
@@ -463,6 +493,17 @@ export default function Grader({ onHome }) {
                       {' '}· auto-filled below ↓
                     </div>
                   )}
+                  {paperMeta?.auto_generated_answers && rubric.trim() && (
+                    <div className="paper-meta-pill" style={{background:'#fef9c3',color:'#92400e',borderColor:'#fde68a', marginBottom: '12px'}}>
+                      🤖 No answer key was provided — AI wrote the expected answers itself. Please
+                      review the rubric below carefully before grading.
+                    </div>
+                  )}
+                  {!paperMeta?.auto_generated_answers && paperFiles.length > 0 && !solutionFiles.length && !rubric.trim() && !paperBusy && (
+                    <div className="paper-meta-pill" style={{marginBottom: '12px'}}>
+                      ℹ️ No solution key selected — AI will generate the expected answers itself when you click Generate.
+                    </div>
+                  )}
                   {!paperBusy && paperFiles.length > 0 && !rubric.trim() && (
                     <div className="paper-meta-pill" style={{background:'#fee2e2',color:'#991b1b',borderColor:'#fca5a5', marginBottom: '12px'}}>
                       ⚠️ Rubric not generated yet — click 'Generate Rubric' above.
@@ -477,6 +518,11 @@ export default function Grader({ onHome }) {
                           : RUBRIC_PLACEHOLDER}
                         onChange={e => setRubric(e.target.value)}
                         disabled={bulk.loading || paperBusy}/>
+              <div className="row" style={{ marginTop: 4 }}>
+                <Button size="sm" onClick={downloadRubricPdf} disabled={!rubric.trim()} icon="📄">
+                  Download Rubric PDF
+                </Button>
+              </div>
               <RubricLibrary scope={{ grade: 0, subject: '', chapter: '' }} currentRubric={rubric} onLoad={setRubric} />
             </Card.Body>
           </Card>
@@ -837,6 +883,23 @@ const FORMAT_ICON = {
   bullets: '📌', hinglish: '🗣', mixed: '🔄',
 }
 
+const VERDICT_META = {
+  correct:       { label: '✓ Correct',       color: '#166534' },
+  partial:       { label: '⚠ Partial',        color: '#9a3412' },
+  wrong:         { label: '✗ Wrong',          color: '#991b1b' },
+  not_attempted: { label: '— Not attempted',  color: '#475569' },
+}
+
+function deriveVerdict(q) {
+  if (q.verdict && VERDICT_META[q.verdict]) return q.verdict
+  const awarded = Number(q.marks_awarded) || 0
+  const total = Number(q.marks_total) || 0
+  if (total <= 0) return 'partial'
+  if (awarded <= 0) return (q.student_answer || '').trim() ? 'wrong' : 'not_attempted'
+  if (awarded >= total) return 'correct'
+  return 'partial'
+}
+
 function FeedbackPanel({ result, onDownloadTranscript }) {
   const v   = result.verifier
   const mc  = result.math_check
@@ -1184,19 +1247,27 @@ function FeedbackPanel({ result, onDownloadTranscript }) {
           <div className="fp-label">📋 Per-question feedback</div>
           <table className="fp-table">
             <thead>
-              <tr><th>Question</th><th>Format</th><th>Marks</th><th>Feedback</th></tr>
+              <tr><th>Question</th><th>Student's answer</th><th>Verdict</th><th>Format</th><th>Marks</th><th>Teacher's feedback</th></tr>
             </thead>
             <tbody>
-              {result.per_question.map((q, i) => (
-                <tr key={i}>
-                  <td className="fp-q">{q.q}</td>
-                  <td className="fp-fmt">
-                    {q.format && <span className={`fmt-badge-sm fmt-${q.format}`}>{FORMAT_ICON[q.format] || '📝'}</span>}
-                  </td>
-                  <td className="fp-m">{q.marks_awarded}/{q.marks_total}</td>
-                  <td className="fp-f">{q.feedback}</td>
-                </tr>
-              ))}
+              {result.per_question.map((q, i) => {
+                const verdict = deriveVerdict(q)
+                const vm = VERDICT_META[verdict]
+                return (
+                  <tr key={i}>
+                    <td className="fp-q">{q.q}</td>
+                    <td className="fp-ans">{q.student_answer || '—'}</td>
+                    <td className="fp-verdict">
+                      <span className="fp-verdict-badge" style={{ color: vm.color, borderColor: vm.color }}>{vm.label}</span>
+                    </td>
+                    <td className="fp-fmt">
+                      {q.format && <span className={`fmt-badge-sm fmt-${q.format}`}>{FORMAT_ICON[q.format] || '📝'}</span>}
+                    </td>
+                    <td className="fp-m">{q.marks_awarded}/{q.marks_total}</td>
+                    <td className="fp-f">{q.feedback}</td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>

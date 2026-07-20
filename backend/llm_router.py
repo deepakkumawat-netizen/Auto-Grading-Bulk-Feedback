@@ -6,10 +6,12 @@
 """
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import re
 import asyncio
+import threading
 from typing import Any
 
 import time as _time
@@ -20,7 +22,28 @@ from google.genai import types as gtypes
 
 
 _groq_client: Groq | None = None
-_gemini_client: genai.Client | None = None
+
+# ── Gemini multi-key rotation ────────────────────────────────────────────────
+# Configure GEMINI_API_KEYS as a comma-separated list to spread every Gemini
+# call round-robin across multiple keys (raises the effective RPM/quota
+# ceiling roughly proportionally to key count). GEMINI_API_KEY (singular)
+# still works for a single-key setup.
+_gemini_clients: dict[str, "genai.Client"] = {}
+_gemini_key_cycle = None
+_gemini_key_cycle_keys: list[str] | None = None
+_gemini_key_lock = threading.Lock()
+
+
+def _gemini_api_keys() -> list[str]:
+    from dotenv import load_dotenv
+    load_dotenv(override=True)
+    multi = os.getenv("GEMINI_API_KEYS", "").strip()
+    if multi:
+        keys = [k.strip() for k in multi.split(",") if k.strip()]
+        if keys:
+            return keys
+    single = os.getenv("GEMINI_API_KEY", "").strip()
+    return [single] if single else []
 
 
 def _safe_int(val: Any, default: int = 0) -> int:
@@ -37,12 +60,6 @@ def _safe_int(val: Any, default: int = 0) -> int:
             if match:
                 return int(match.group())
     return default
-
-
-_GROQ_TEXT_CHAIN = [
-    "llama-3.3-70b-versatile",   # smartest, lowest TPM cap — primary
-    "llama-3.1-8b-instant",      # last-resort: 8× higher TPM but may over-count marks
-]
 
 
 def _parse_retry_after(msg: str) -> float:
@@ -68,10 +85,10 @@ def _gemini_text_fallback(messages, *, max_tokens: int, temperature: float = 0.2
     prompt += "\n".join(usr_parts)
 
     want_json = bool(response_format and response_format.get("type") == "json_object")
-    cfg_kwargs = dict(temperature=temperature, max_output_tokens=max(8192, max_tokens))
+    cfg_kwargs = dict(temperature=temperature, max_output_tokens=max(8192, max_tokens),
+                       thinking_config=gtypes.ThinkingConfig(thinking_budget=0))
     if want_json:
         cfg_kwargs["response_mime_type"] = "application/json"
-        cfg_kwargs["thinking_config"] = gtypes.ThinkingConfig(thinking_budget=0)
 
     last_err = None
     for model in _gemini_model_chain():
@@ -92,74 +109,15 @@ def _gemini_text_fallback(messages, *, max_tokens: int, temperature: float = 0.2
     raise last_err or RuntimeError("Gemini is currently disabled due to quota exhaustion")
 
 
-_groq_blocked_until = {}
-
-def _is_groq_model_blocked(model_name: str) -> bool:
-    import time
-    return time.time() < _groq_blocked_until.get(model_name, 0.0)
-
-def _block_groq_model(model_name: str):
-    import time
-    _groq_blocked_until[model_name] = time.time() + 60  # block for 1 minute
-    print(f"[groq] Rate limit hit. Blocking model {model_name} for 1 minute to bypass retry delays.")
-
-
 def _groq_chat_with_retry(model: str, messages, *, max_tokens: int,
                            temperature: float = 0.2,
                            response_format=None) -> str:
-    # Route all requests to Gemini exclusively
+    """All text/JSON generation is routed through Gemini (this deployment runs
+    on GEMINI_API_KEY only; Groq text models are not configured). Vision OCR
+    still has a Groq vision fallback — see groq_vision_ocr / _try_groq_chunked."""
     return _gemini_text_fallback(messages, max_tokens=max_tokens,
                                   temperature=temperature,
                                   response_format=response_format)
-    
-    # Filter out blocked models unless all are blocked
-    active_chain = [m for m in chain if not _is_groq_model_blocked(m)]
-    if not active_chain:
-        active_chain = chain
-        
-    last_err = None
-    for ci, m in enumerate(active_chain):
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            try:
-                kwargs = dict(model=m, messages=messages, temperature=temperature,
-                              max_tokens=max_tokens)
-                if response_format is not None:
-                    kwargs["response_format"] = response_format
-                rsp = _groq().chat.completions.create(**kwargs)
-                if m != model:
-                    print(f"[groq] WARN used fallback model {m} (primary {model} was rate-limited). "
-                          "Marks may be over-counted - verify the rubric carefully.")
-                return rsp.choices[0].message.content or ""
-            except Exception as e:
-                msg = str(e); last_err = e
-                if "413" in msg or "Request too large" in msg:
-                    print(f"[groq {m}] Request too large (413). Skipping retries.")
-                    break
-                if ("429" in msg or "rate limit" in msg.lower()
-                        or "rate_limit" in msg.lower() or "tokens per minute" in msg.lower()):
-                    if attempt + 1 < max_attempts:
-                        wait = _parse_retry_after(msg)
-                        print(f"[groq {m}] rate-limited (attempt {attempt+1}/{max_attempts}), waiting {wait:.1f}s then retrying same model...")
-                        _time.sleep(wait)
-                        continue
-                    # Only block when we exhaust all attempts for this model
-                    _block_groq_model(m)
-                    print(f"[groq {m}] still rate-limited after {max_attempts} tries - falling to next model")
-                    break
-                else:
-                    print(f"[groq {m}] failed with error ({e}) - falling to next model")
-                    break
-    # All Groq models exhausted - fall back to Gemini (separate quota bucket)
-    print(f"[groq->gemini] All Groq models rate-limited. Falling back to Gemini 2.5 Flash. Last Groq err: {last_err}")
-    try:
-        return _gemini_text_fallback(messages, max_tokens=max_tokens,
-                                      temperature=temperature,
-                                      response_format=response_format)
-    except Exception as ge:
-        raise RuntimeError(
-            f"Both Groq AND Gemini fallback failed. Groq: {last_err}. Gemini: {ge}"
-        )
 
 
 def _groq() -> Groq:
@@ -174,20 +132,29 @@ def _groq() -> Groq:
 
 
 def _gemini() -> genai.Client:
-    global _gemini_client
-    from dotenv import load_dotenv
-    load_dotenv(override=True)
-    key = os.getenv("GEMINI_API_KEY", "").strip()
-    if not key: raise RuntimeError("GEMINI_API_KEY not set")
-    if _gemini_client is None or getattr(_gemini_client, "_api_key", None) != key:
-        _gemini_client = genai.Client(
+    """Returns the next Gemini client in rotation. With a single key configured
+    this always returns the same (cached) client — identical to before."""
+    global _gemini_key_cycle, _gemini_key_cycle_keys
+    keys = _gemini_api_keys()
+    if not keys:
+        raise RuntimeError("GEMINI_API_KEY not set")
+
+    with _gemini_key_lock:
+        if _gemini_key_cycle_keys != keys:
+            _gemini_key_cycle_keys = keys
+            _gemini_key_cycle = itertools.cycle(keys)
+        key = next(_gemini_key_cycle)
+
+    client = _gemini_clients.get(key)
+    if client is None:
+        client = genai.Client(
             api_key=key,
             http_options=gtypes.HttpOptions(
                 retry_options=gtypes.HttpRetryOptions(attempts=1)
-            )
+            ),
         )
-        _gemini_client._api_key = key
-    return _gemini_client
+        _gemini_clients[key] = client
+    return client
 
 
 def _repair_json_quotes(raw: str) -> str:
@@ -443,10 +410,17 @@ def _filter_solution_key_for_chunk(paper_chunk: str, solution_text: str) -> str:
 
 
 def generate_rubric_from_questions(question_paper_text: str, solution_key_text: str = "") -> dict[str, Any]:
-    """Read a question paper (extracted text) and produce a teacher-ready rubric using Gemini exclusively."""
+    """Read a question paper (extracted text) and produce a teacher-ready rubric using Gemini exclusively.
+
+    If solution_key_text is empty, no teacher answer key was provided — Gemini
+    synthesizes the expected answers itself from the question paper alone.
+    The returned dict's `auto_generated_answers` flag tells the caller this
+    happened so the UI can warn the teacher to double-check the rubric.
+    """
     out = _generate_rubric_gemini(question_paper_text, solution_key_text)
     out = _recalculate_rubric_stats(out)
     out = _correct_total_marks(out, question_paper_text)
+    out["auto_generated_answers"] = not bool(solution_key_text.strip())
     # Always include paper metadata extracted from header
     meta = extract_paper_metadata(question_paper_text)
     out["paper_grade"]   = meta["grade"]
@@ -497,6 +471,18 @@ def _generate_rubric_gemini(paper_text: str, solution_key_text: str = "") -> dic
             "\"\"\"\n"
             f"{solution_key_text}\n"
             "\"\"\"\n\n"
+        )
+    else:
+        prompt += (
+            "⚠️ NO TEACHER SOLUTION KEY WAS PROVIDED for this question paper.\n"
+            "Every instruction above that refers to 'the teacher's Solution Key / Answer Key' "
+            "does not apply here — there is none. Instead, act as the subject-matter expert "
+            "examiner yourself: work out the correct, ideal answer (or full step-by-step "
+            "solution for numerical/derivation questions) for EVERY question, based solely on "
+            "what the question itself asks and its mark weightage. Write that answer as the "
+            "detailed marking criteria for each rubric line, exactly as a teacher-authored key "
+            "would read. Do not leave placeholders — every question must get a real, complete "
+            "expected answer.\n\n"
         )
     prompt += (
         "Output format — ONE line per question:\n"
@@ -1531,7 +1517,12 @@ def gemini_ocr(image_bytes: bytes, mime: str = "image/jpeg",
             if attempt > 0:
                 time.sleep(2 * (2 ** (attempt - 1)))
             try:
-                rsp = _gemini().models.generate_content(model=model, contents=parts)
+                rsp = _gemini().models.generate_content(
+                    model=model, contents=parts,
+                    config=gtypes.GenerateContentConfig(
+                        thinking_config=gtypes.ThinkingConfig(thinking_budget=0)
+                    ),
+                )
                 return (rsp.text or "").strip()
             except Exception as e:
                 last_err = e
@@ -1577,6 +1568,7 @@ async def transcribe_chunk_async(images_chunk: list[tuple[bytes, str]], start_pa
                 response_mime_type="application/json",
                 temperature=0.1,
                 max_output_tokens=4000,
+                thinking_config=gtypes.ThinkingConfig(thinking_budget=0),
             ),
         )
         return _extract_json(rsp.text or "")
@@ -1617,6 +1609,7 @@ def _try_gemini_vision_model(model: str, parts, retries: int = 1, base_wait: flo
                     response_mime_type="application/json",
                     temperature=0.2,
                     max_output_tokens=8192,
+                    thinking_config=gtypes.ThinkingConfig(thinking_budget=0),
                 ),
             )
             return True, _extract_json(rsp.text or "")

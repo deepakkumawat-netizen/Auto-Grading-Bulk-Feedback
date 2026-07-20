@@ -160,6 +160,35 @@ export default function ClassAnalytics({ results, analytics }) {
         </>
       )}
 
+      {/* ─── Possible copying between students ─── */}
+      {analytics?.copy_check?.length > 0 && (
+        <>
+          <h3 style={{ marginTop: 22 }}>🕵️ Possible copying detected
+            <span className="chart-sub">pairs with suspiciously similar answers</span>
+          </h3>
+          <p className="chart-help">
+            Answers are compared question-by-question across the whole batch. A high match on
+            2+ questions — beyond what a shared rubric would explain — is flagged here for
+            manual review. This is a signal, not proof of copying.
+          </p>
+          <div className="copy-check-list">
+            {analytics.copy_check.map((pair, i) => (
+              <div className="copy-check-card" key={i}>
+                <div className="cc-head">
+                  <span className="cc-pair">{pair.student_a} ↔ {pair.student_b}</span>
+                  <span className="cc-avg">{pair.avg_similarity}% avg match</span>
+                </div>
+                <div className="cc-questions">
+                  {pair.matched_questions.map((m, j) => (
+                    <span key={j} className="cc-q-badge">{m.q}: {m.similarity}%</span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
       {graded.some(r => r.needs_review) && (
         <div className="needs-review-banner">
           ⚠️ {graded.filter(r => r.needs_review).length} answer(s) flagged by the verifier — review before exporting.

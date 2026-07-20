@@ -115,8 +115,8 @@ body { background: var(--bg-page); color: var(--text); }
 .foot { color: var(--text-faded); border-color: var(--border); }
 .transcript { background: var(--bg-card-soft); color: var(--text-muted); border-color: var(--border); }
 .modal-card { background: var(--bg-elevated) !important; border-color: var(--border-strong) !important; }
-.toast { background: var(--bg-elevated); border-color: var(--border-strong); color: var(--text-strong); }
-.toast-detail { color: var(--text-muted); }
+.toast { background: var(--bg-elevated) !important; border-color: var(--border-strong) !important; color: var(--text-strong) !important; }
+.toast-detail { color: var(--text-muted) !important; }
 .dropzone { border-color: var(--border-accent); }
 .file-item { background: var(--bg-card-soft); border-color: var(--border-dim); color: var(--text); }
 .skel { background: linear-gradient(90deg, var(--border-dim) 25%, var(--border) 50%, var(--border-dim) 75%); background-size: 200% 100%; }
@@ -208,7 +208,6 @@ button { font-family: inherit; }
   padding: 18px 40px; position: sticky; top: 0; z-index: 10;
   backdrop-filter: blur(20px) saturate(140%);
   -webkit-backdrop-filter: blur(20px) saturate(140%);
-  background: rgba(6, 6, 20, 0.6);
   border-bottom: 1px solid rgba(99, 102, 241, 0.18);
 }
 .brand {
@@ -384,7 +383,7 @@ button { font-family: inherit; }
 .app-bar {
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 28px;
-  background: rgba(6, 6, 20, 0.7); backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
   border-bottom: 1px solid rgba(99, 102, 241, 0.2);
   position: sticky; top: 0; z-index: 5;
 }
@@ -542,6 +541,33 @@ button { font-family: inherit; }
 [data-theme="light"] .misc-stu { background: #f1f5f9; color: #1e293b; }
 [data-theme="light"] .misc-stu.misc-more { background: rgba(99, 102, 241, 0.15); color: #4338ca; }
 [data-theme="light"] .misc-remedy { background: rgba(16, 185, 129, 0.08); color: #065f46; }
+
+/* ═════════ Copy-check (cross-student similarity) list ═════════ */
+.copy-check-list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.copy-check-card {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.28); border-radius: 12px;
+  padding: 12px 16px;
+}
+.cc-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.cc-pair { font-weight: 700; color: #fca5a5; font-size: 14px; }
+.cc-avg {
+  font-size: 11px; font-weight: 800; padding: 3px 10px;
+  background: rgba(239, 68, 68, 0.25); color: #fff;
+  border-radius: 100px; white-space: nowrap;
+}
+.cc-questions { display: flex; flex-wrap: wrap; gap: 6px; }
+.cc-q-badge {
+  font-size: 11px; padding: 2px 9px;
+  background: rgba(148, 163, 184, 0.15); color: #cbd5e1;
+  border-radius: 100px; font-weight: 600;
+}
+[data-theme="light"] .copy-check-card {
+  background: rgba(220, 38, 38, 0.05); border-color: rgba(220, 38, 38, 0.25);
+}
+[data-theme="light"] .cc-pair { color: #b91c1c; }
+[data-theme="light"] .cc-avg { background: #dc2626; color: #fff; }
+[data-theme="light"] .cc-q-badge { background: #f1f5f9; color: #1e293b; }
 
 /* ═════════ Study plan block (in expanded feedback) ═════════ */
 .fp-studyplan {
@@ -1365,6 +1391,13 @@ button.small.danger { background: rgba(239, 68, 68, 0.15); color: #fca5a5; borde
 .fp-q { font-weight: 600; white-space: nowrap; }
 .fp-m { font-weight: 700; color: #c4b5fd; white-space: nowrap; }
 .fp-f { color: #cbd5e1; line-height: 1.5; }
+.fp-ans { color: #cbd5e1; line-height: 1.5; font-style: italic; }
+.fp-verdict { white-space: nowrap; }
+.fp-verdict-badge {
+  display: inline-block; padding: 2px 9px; border-radius: 100px;
+  font-size: 11px; font-weight: 700; border: 1px solid; white-space: nowrap;
+}
+[data-theme="light"] .fp-ans { color: #475569; }
 
 @media (max-width: 800px) { .fp-grid { grid-template-columns: 1fr; } }
 
@@ -1411,6 +1444,15 @@ button.small.danger { background: rgba(239, 68, 68, 0.15); color: #fca5a5; borde
 [data-theme="light"] .toast-title,
 [data-theme="light"] .modal-head h3 {
   color: #0f172a;
+}
+/* .features h2 / .how h2 use a gradient background-clip for the whole heading
+   (near-white -> lavender) which is invisible against a light page background
+   — give them a dark-to-purple gradient that reads clearly instead. */
+[data-theme="light"] .features h2,
+[data-theme="light"] .how h2 {
+  background: linear-gradient(135deg, #1e1b4b, #6d28d9);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 [data-theme="light"] .lead,
 [data-theme="light"] .feature-card p,
@@ -1532,8 +1574,13 @@ button.small.danger { background: rgba(239, 68, 68, 0.15); color: #fca5a5; borde
 [data-theme="light"] .dropzone-accept { color: #475569; }
 
 /* Buttons */
-[data-theme="light"] .btn { color: #0f172a; }
+/* Exclude btn-primary/btn-danger — they already set their own text color
+   deliberately for their colored backgrounds; forcing dark text here would
+   clash with the purple gradient / red tint in both themes. */
+[data-theme="light"] .btn:not(.btn-primary):not(.btn-danger) { color: #0f172a; }
 [data-theme="light"] .btn:hover { box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08); }
+[data-theme="light"] .btn-subtle { background: #ffffff; border-color: rgba(15, 23, 42, 0.12); }
+[data-theme="light"] .btn-ghost  { background: rgba(15, 23, 42, 0.05); }
 
 /* Banner */
 [data-theme="light"] .banner {

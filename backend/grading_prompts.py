@@ -278,6 +278,39 @@ def _sum_rubric_marks(rubric: str) -> int:
     return int(round(total_marks))
 
 
+def parse_rubric_rows(rubric: str) -> list[dict]:
+    """Split a rubric (AI-generated or teacher-edited) into ordered display rows.
+
+    Each question line becomes {"q": header, "marks": str, "criteria": str}.
+    Non-question lines (section headers like "Section A", blank separators)
+    become {"q": None, "marks": None, "criteria": <raw line>} divider rows,
+    so a PDF/UI renderer can show them as section breaks without losing them.
+    """
+    import re
+    rows: list[dict] = []
+    for raw_line in (rubric or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        line_clean = re.sub(r"^[-*#\s]+", "", line)
+        is_q = re.match(r"^(?:q\d+|question\s*\d+|q\s*\d+|\b\d+[\.\)])",
+                        line_clean, re.IGNORECASE)
+        if not is_q:
+            rows.append({"q": None, "marks": None, "criteria": line_clean})
+            continue
+
+        colon_idx = line_clean.find(":")
+        header = line_clean[:colon_idx].strip() if colon_idx != -1 else line_clean
+        criteria = line_clean[colon_idx + 1:].strip() if colon_idx != -1 else ""
+
+        m = re.search(r"[\(\[]([\d\./\s\+½¼¾\-]+)\s*marks?[\)\]]", header, re.IGNORECASE)
+        marks = m.group(1).strip() if m else ""
+        q_label = re.sub(r"[\(\[]\s*[\d\./\s\+½¼¾\-]+\s*(?:marks?)?\s*[\)\]]",
+                         "", header).strip()
+        rows.append({"q": q_label or header, "marks": marks, "criteria": criteria or "—"})
+    return rows
+
+
 def bulk_grader_prompt(grade: int, subject: str, chapter: str, rubric: str,
                        exam_config: dict = None, handwriting_audit: bool = False) -> str:
     tone = _TONE[_tier(grade)]
@@ -341,6 +374,8 @@ Step 12 - Write feedback. If is_typed = true, note in the feedback that the answ
   "answer_formats_used": [string],
   "per_question": [
     { "q": string, "marks_awarded": number, "marks_total": number,
+       "student_answer": string (brief quote/paraphrase of exactly what the student wrote for THIS question, or "Not attempted" if blank),
+       "verdict": "correct"|"partial"|"wrong"|"not_attempted",
        "feedback": string,
        "format": "text"|"diagram"|"table"|"math"|"bullets"|"hinglish"|"mixed" }
   ],
@@ -410,6 +445,8 @@ Step 12 - Write feedback. If is_typed = true, note in the feedback that the answ
   "answer_formats_used": [string],
   "per_question": [
     { "q": string, "marks_awarded": number, "marks_total": number,
+       "student_answer": string (brief quote/paraphrase of exactly what the student wrote for THIS question, or "Not attempted" if blank),
+       "verdict": "correct"|"partial"|"wrong"|"not_attempted",
        "feedback": string,
        "format": "text"|"diagram"|"table"|"math"|"bullets"|"hinglish"|"mixed" }
   ],
@@ -445,8 +482,9 @@ CRITICAL DIRECTIVES:
 5. UNANSWERED/MISSING QUESTIONS:
    - If a question is unanswered, blank, or missing in the student's response, you MUST:
      a. Award 0 marks (marks_awarded = 0) for that question.
-     b. Set the `feedback` for that question to EXACTLY: "Question not attempted."
-     c. Create a mistake entry in the `mistakes` array with type "blank" and description "Question not attempted."
+     b. Set `verdict` to "not_attempted" and `student_answer` to "Not attempted".
+     c. Set the `feedback` for that question to EXACTLY: "Question not attempted."
+     d. Create a mistake entry in the `mistakes` array with type "blank" and description "Question not attempted."
 
 6. GRADE-LEVEL APPROPRIATE FEEDBACK:
    - Generate feedback according to the student’s grade level.
@@ -454,13 +492,14 @@ CRITICAL DIRECTIVES:
    - Base feedback only on the teacher's rubric and student response. Do NOT generate generic AI feedback.
    - Mention missing or incorrect steps using grade-appropriate language.
 
-7. DETAILED & SPECIFIC FEEDBACK (DONE/MISSING FORMAT):
-   - For every question in `per_question`, provide a clear, proper, and specific step-by-step breakdown in the `feedback` field.
-   - You MUST format the feedback string exactly using this structure to show which part of the process was completed by the student and which part was not:
-     "Done: [Briefly describe the correct steps, formulas, or value points completed by the student] | Missing/Incorrect: [Briefly describe the specific steps, calculations, or value points from the teacher's rubric that the student omitted or got wrong]"
-   - If the student got full marks, write: "Done: All steps completed correctly | Missing/Incorrect: None"
-   - Do NOT output vague, unhelpful feedback such as "Correct", "Partially correct", "Incorrect", or "Incorrect option". You must explicitly show what was done and what was not.
-   - Keep all `mistakes` descriptions and the overall `suggestion` helpful, actionable, and clear.
+7. WRITE LIKE A REAL TEACHER, NOT A TEMPLATE:
+   - For every question in `per_question`, first fill `student_answer` with a short, honest quote or paraphrase of what the student actually wrote for that specific question (or "Not attempted" if blank) — this lets the teacher see the student's own answer at a glance without re-reading the whole transcript.
+   - Set `verdict` to exactly one of "correct" (full marks), "partial" (some but not all marks), "wrong" (attempted but 0 marks / fundamentally incorrect), or "not_attempted" (blank).
+   - Then write `feedback` the way an experienced, engaged teacher would actually write it in the margin of a paper: natural sentences, specific to what this student did, in a warm-but-honest voice. Say clearly what they got right and what they missed or got wrong — but as flowing prose, NOT a rigid template.
+   - Banned: do NOT prefix feedback with labels like "Done:" / "Missing/Incorrect:" / "Correct:" / "Verdict:". Do NOT output vague one-word feedback like "Correct", "Incorrect", or "Partially correct" with nothing else.
+   - Good example (middle-tier tone): "You set up the equation correctly and substituted the right values, but you forgot to convert the units to SI before solving — that's why your final answer is off by a factor of 1000. The method shows solid understanding."
+   - Good example (junior tone): "Great job labelling the leaf parts! You just missed writing 'stomata' — that's the tiny hole where the leaf breathes."
+   - Keep all `mistakes` descriptions and the overall `suggestion` in the same natural, teacher-like voice — helpful, actionable, specific to this student's actual answer, never generic or robotic.
 
 8. FEEDBACK LANGUAGE:
    - Write all feedback, suggestions, mistake descriptions, and overall suggestions in the language of the subject being examined (e.g. write in Hindi for a Hindi paper, and write in English for English/Science/Maths).

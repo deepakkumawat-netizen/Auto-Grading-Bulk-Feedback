@@ -56,9 +56,22 @@ start.bat
 ```
 GROQ_API_KEY=your_groq_key
 GEMINI_API_KEY=your_gemini_key
+# Optional: comma-separated list of multiple Gemini keys, round-robin rotated
+# on every call. Takes priority over GEMINI_API_KEY when set.
+GEMINI_API_KEYS=key_one,key_two,key_three
 GROQ_MODEL=llama-3.3-70b-versatile
 GEMINI_MODEL=gemini-2.5-flash
+GRADE_CONCURRENCY=5
 ```
+`GRADE_CONCURRENCY` controls how many answer sheets are graded in parallel per
+bulk-grading batch (default 5). Raise it if your Gemini quota tier allows more
+concurrent requests; lower it if you see 429 rate-limit errors.
+
+`GEMINI_API_KEYS` lets you register several Gemini API keys (e.g. from
+separate free-tier projects); every Gemini call — OCR, grading, verifier,
+rubric generation — round-robins across them, multiplying your effective
+RPM/quota ceiling roughly by the number of keys. Falls back to the single
+`GEMINI_API_KEY` if unset.
 
 ## How It Works
 

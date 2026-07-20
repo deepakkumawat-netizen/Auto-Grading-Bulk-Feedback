@@ -27,7 +27,7 @@ from grading_prompts import bulk_grader_prompt, _sum_rubric_marks
 from llm_router import grade_text, verify_grade, gemini_ocr, detect_scope, \
     cluster_misconceptions, make_study_plan, generate_rubric_from_questions, \
     extract_paper_metadata
-from pdf_writer import build_feedback_pdf
+from pdf_writer import build_feedback_pdf, build_rubric_pdf
 from nlp_polish import polish_feedback_dict
 from agent_tools import verify_math
 from agent_features import insights_chat, generate_practice, generate_class_plan
@@ -35,6 +35,7 @@ from transcript_export import transcripts_to_pdf, transcripts_to_docx
 import rubric_store
 import history_store
 import exam_config_store
+import copy_check
 from grading_prompts import build_exam_constraints
 from grade_profiles import get_profile, build_tier_label
 import cbse_kb
@@ -310,7 +311,12 @@ def _try_gemini_unified(image_blobs: list[bytes], prompt: str) -> str:
         for attempt in range(2):
             if attempt > 0: time.sleep(3)
             try:
-                rsp = _gemini().models.generate_content(model=model, contents=parts)
+                rsp = _gemini().models.generate_content(
+                    model=model, contents=parts,
+                    config=gtypes.GenerateContentConfig(
+                        thinking_config=gtypes.ThinkingConfig(thinking_budget=0)
+                    ),
+                )
                 return (rsp.text or "").strip()
             except Exception as e:
                 msg = str(e); last_err = e
@@ -912,7 +918,7 @@ async def run_grade_bulk_in_background(
     resolved_config: dict | None,
     parsed_handwriting_audit: bool,
 ):
-    sem = asyncio.Semaphore(3)
+    sem = asyncio.Semaphore(max(1, int(os.getenv("GRADE_CONCURRENCY", "5"))))
     async def bounded(filename: str, raw: bytes):
         if session_id and session_id in GRADING_PROGRESS:
             GRADING_PROGRESS[session_id]["files"][filename] = "grading"
@@ -1007,12 +1013,21 @@ async def run_grade_bulk_in_background(
         except Exception as e:
             print(f"[misconceptions] clustering failed: {e}")
 
+    # Cross-student copy/plagiarism detection (pure-Python, no LLM call)
+    copy_check_pairs = []
+    if len(graded) >= 2:
+        try:
+            copy_check_pairs = await asyncio.to_thread(copy_check.detect_possible_copying, results)
+        except Exception as e:
+            print(f"[copy_check] detection failed: {e}")
+
     response = {
         "count": len(results), "graded": len(graded), "results": results,
         "class_analytics": {
             "average_percentage": round(total_pct, 1),
             "top_mistakes":       [{"type": k, "count": v} for k, v in top],
             "misconceptions":     misconceptions,
+            "copy_check":         copy_check_pairs,
         },
     }
 
@@ -1398,20 +1413,17 @@ async def rubric_from_paper(
     solution:         UploadFile = File(None),
     session_id:       str        = Form(None),
 ):
-    """Teacher uploads a question paper (PDF / image / txt) and solution sheet.
-    Backend extracts the text, then asks Groq/Gemini to produce a marking rubric. Returns:
-        { rubric: str, questions_found: int, total_marks: int, extracted_text: str }
+    """Teacher uploads a question paper (PDF / image / txt) and, optionally, a
+    solution/answer key. Backend extracts the text, then asks Gemini to produce
+    a marking rubric. If no solution key is given, Gemini generates the
+    expected answers itself from the question paper alone (auto_generated_answers
+    will be true in the response so the teacher knows to double-check it). Returns:
+        { rubric: str, questions_found: int, total_marks: int, extracted_text: str,
+          auto_generated_answers: bool }
     """
     raw_paper = await paper.read()
     if not raw_paper:
         raise HTTPException(400, "Empty question paper file")
-
-    if not solution:
-        raise HTTPException(400, "Please upload the Answer Key / Solution Key alongside the Question Paper to generate the grading rubric.")
-
-    raw_sol = await solution.read()
-    if not raw_sol:
-        raise HTTPException(400, "Please upload the Answer Key / Solution Key alongside the Question Paper to generate the grading rubric.")
 
     paper_text = await _extract_doc_text(paper.filename or "paper", raw_paper)
     if not paper_text or paper_text.startswith("["):
@@ -1419,14 +1431,17 @@ async def rubric_from_paper(
     if len(paper_text.strip()) < 30:
         raise HTTPException(400, "Too little text extracted from question paper — paper may be too low resolution.")
 
-    solution_text = await _extract_doc_text(solution.filename or "solution", raw_sol)
-    if not solution_text or solution_text.startswith("["):
-        raise HTTPException(400, f"Could not read solution key: {solution_text or 'no text extracted'}")
-    if len(solution_text.strip()) < 30:
-        raise HTTPException(400, "Too little text extracted from solution key — key may be too low resolution.")
-
-    # Slice solution key to match the question paper's set
-    solution_text = filter_solution_by_set(paper.filename or "paper", paper_text, solution_text)
+    solution_text = ""
+    if solution is not None:
+        raw_sol = await solution.read()
+        if raw_sol:
+            solution_text = await _extract_doc_text(solution.filename or "solution", raw_sol)
+            if not solution_text or solution_text.startswith("["):
+                raise HTTPException(400, f"Could not read solution key: {solution_text or 'no text extracted'}")
+            if len(solution_text.strip()) < 30:
+                raise HTTPException(400, "Too little text extracted from solution key — key may be too low resolution.")
+            # Slice solution key to match the question paper's set
+            solution_text = filter_solution_by_set(paper.filename or "paper", paper_text, solution_text)
 
     if not session_id:
         import uuid
@@ -1444,6 +1459,20 @@ async def rubric_from_paper(
     )
 
     return {"status": "started", "session_id": session_id}
+
+
+@app.post("/api/rubric/pdf")
+async def rubric_pdf(payload: dict):
+    """Body: { rubric: str, meta?: {board, grade, subject, chapter, total_marks,
+    questions_found} }. Renders the current rubric (question + expected answer +
+    step-wise marking criteria, per question) as a downloadable PDF marking scheme."""
+    rubric = (payload.get("rubric") or "").strip()
+    meta   = payload.get("meta") or {}
+    if not rubric:
+        raise HTTPException(400, "Rubric is required")
+    pdf = await asyncio.to_thread(build_rubric_pdf, rubric, meta)
+    return StreamingResponse(iter([pdf]), media_type="application/pdf",
+                             headers={"Content-Disposition": 'attachment; filename="rubric.pdf"'})
 
 
 @app.post("/api/feedback/pdf")

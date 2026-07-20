@@ -16,8 +16,11 @@ env/
 # Data / runtime
 backend/data/uploads/
 backend/data/ncert_chroma/
+backend/data/ocr_cache/
 backend/data/*.db
 backend/data/*.db-journal
+backend/data/*.json
+backend/data/latest_rubric_clean.txt
 
 # Node / Vite
 node_modules/
