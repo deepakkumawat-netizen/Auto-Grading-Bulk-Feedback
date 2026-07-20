@@ -334,7 +334,7 @@ def _try_groq_chunked(image_blobs: list[bytes], prompt: str, chunk_size: int | N
     import os
     
     if chunk_size is None:
-        model = os.getenv("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+        model = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
         chunk_size = 3 if "qwen" in model.lower() else 5
         
     chunks = [image_blobs[i:i + chunk_size] for i in range(0, len(image_blobs), chunk_size)]

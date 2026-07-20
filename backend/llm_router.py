@@ -1579,7 +1579,7 @@ def groq_vision_ocr(image_bytes_list: list[bytes], prompt: str,
     Used as fallback when Gemini quota is exhausted."""
     import base64
 
-    model = os.getenv("GROQ_VISION_MODEL", "").strip() or "llama-3.2-11b-vision-preview"
+    model = os.getenv("GROQ_VISION_MODEL", "").strip() or "qwen/qwen3.6-27b"
     max_imgs = 3 if "qwen" in model.lower() else 5
     content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
     for img in image_bytes_list[:max_imgs]:  # Groq vision limits depend on model (Qwen supports up to 3)
@@ -1750,7 +1750,7 @@ def _grade_with_groq_vision_fallback(system_prompt: str,
     Up to 5 images per call. Returns the same JSON schema as Gemini path."""
     import base64
 
-    model = os.getenv("GROQ_VISION_MODEL", "").strip() or "llama-3.2-11b-vision-preview"
+    model = os.getenv("GROQ_VISION_MODEL", "").strip() or "qwen/qwen3.6-27b"
     content: list[dict[str, Any]] = [{"type": "text", "text": system_prompt}]
     for img_bytes, mime in images[:5]:  # Groq caps at ~5 images per call
         b64 = base64.b64encode(img_bytes).decode("ascii")
@@ -1814,7 +1814,7 @@ def grade_handwriting(system_prompt: str,
         result = _grade_with_groq_vision_fallback(system_prompt, images)
         if isinstance(result, dict):
             result["_fallback_model_used"] = os.getenv(
-                "GROQ_VISION_MODEL", "").strip() or "llama-3.2-11b-vision-preview"
+                "GROQ_VISION_MODEL", "").strip() or "qwen/qwen3.6-27b"
         return result
     except Exception as e:
         groq_err = e
