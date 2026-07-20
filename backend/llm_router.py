@@ -1169,7 +1169,8 @@ def grade_text(system_prompt: str, student_answer: str) -> dict[str, Any]:
             print(f"[grader] Compressing single-call system prompt (estimated total tokens: {estimated_total}).")
             run_prompt = _compress_system_prompt(system_prompt)
             
-        max_tokens = max(1500, q_count * 200 + 800)
+        is_audit = "handwriting_analysis" in system_prompt or "homework_completeness" in system_prompt
+        max_tokens = max(6000 if is_audit else 1500, q_count * 200 + 800)
         content = _groq_chat_with_retry(
             model,
             messages=[
@@ -1276,7 +1277,8 @@ def grade_text(system_prompt: str, student_answer: str) -> dict[str, Any]:
         
         # Enforce chunk-specific marks total rule
         chunk_marks = len(re.findall(r"^\s*Q\d", r_chunk, re.MULTILINE))
-        max_tokens = max(1500, chunk_marks * 200 + 800)
+        is_audit = "handwriting_analysis" in system_prompt or "homework_completeness" in system_prompt
+        max_tokens = max(6000 if is_audit else 1500, chunk_marks * 200 + 800)
         
         # Dynamically extract question numbers from this rubric chunk
         chunk_q_nums = set()
@@ -1751,8 +1753,9 @@ def _grade_with_groq_vision_fallback(system_prompt: str,
     import base64
 
     model = os.getenv("GROQ_VISION_MODEL", "").strip() or "qwen/qwen3.6-27b"
+    max_imgs = 3 if "qwen" in model.lower() else 5
     content: list[dict[str, Any]] = [{"type": "text", "text": system_prompt}]
-    for img_bytes, mime in images[:5]:  # Groq caps at ~5 images per call
+    for img_bytes, mime in images[:max_imgs]:  
         b64 = base64.b64encode(img_bytes).decode("ascii")
         content.append({
             "type": "image_url",
