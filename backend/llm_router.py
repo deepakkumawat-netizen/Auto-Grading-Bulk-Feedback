@@ -1184,8 +1184,8 @@ def grade_text(system_prompt: str, student_answer: str) -> dict[str, Any]:
         return _extract_json(content)
         
     student_tokens = len(student_answer) // 4
-    # Set an optimal chunk size of 20 questions.
-    chunk_size = 20
+    # Set an optimal chunk size of 8 questions to fit within free tier TPM limits.
+    chunk_size = 8
         
     # Otherwise, chunk the grading question-by-question to avoid TPM rate limits (413)
     print(f"[grader] Splitting {q_count} questions into chunks of {chunk_size} to fit Groq TPM limit (estimated answer tokens: {student_tokens}).")
