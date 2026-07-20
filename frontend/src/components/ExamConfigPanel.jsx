@@ -22,7 +22,7 @@ const DEFAULT_FEEDBACK = {
   show_concepts: true, revision_tips: true,
 };
 
-export default function ExamConfigPanel({ value, onChange, apiBase = "/api" }) {
+export default function ExamConfigPanel({ value, onChange, apiBase = "/api", appMode = "exam" }) {
   const [open, setOpen]       = useState(false);
   const [saved, setSaved]     = useState([]);
   const [saveName, setSaveName] = useState("");
@@ -164,72 +164,75 @@ export default function ExamConfigPanel({ value, onChange, apiBase = "/api" }) {
                   placeholder="e.g. Chemical reactions, Ch. 1-3" />
               </label>
             </div>
-            <div className="ecp-grid-2">
-              <label className="ecp-field">
-                <span>Exam type</span>
-                <select value={cfg.exam_type || "Unit test"} onChange={e => update({ exam_type: e.target.value })}>
-                  {TYPES.map(t => <option key={t}>{t}</option>)}
-                </select>
-              </label>
-              <label className="ecp-field">
-                <span>Total paper marks</span>
-                <input type="number" min="1" max="500" value={cfg.paper_total || 100}
-                  onChange={e => update({ paper_total: parseInt(e.target.value) || 100 })} />
-              </label>
-            </div>
+            {appMode === "exam" && (
+              <div className="ecp-grid-2">
+                <label className="ecp-field">
+                  <span>Exam type</span>
+                  <select value={cfg.exam_type || "Unit test"} onChange={e => update({ exam_type: e.target.value })}>
+                    {TYPES.map(t => <option key={t}>{t}</option>)}
+                  </select>
+                </label>
+                <label className="ecp-field">
+                  <span>Total paper marks</span>
+                  <input type="number" min="1" max="500" value={cfg.paper_total || 100}
+                    onChange={e => update({ paper_total: parseInt(e.target.value) || 100 })} />
+                </label>
+              </div>
+            )}
           </div>
 
-          {/* Question marks */}
-          <div className="ecp-section">
-            <div className="ecp-section-label">Question-wise marks</div>
-            <table className="ecp-table">
-              <thead>
-                <tr>
-                  <th style={{width:80}}>Question</th>
-                  <th>Type</th>
-                  <th style={{width:80}}>Marks</th>
-                  <th style={{width:120}}>Partial credit</th>
-                  <th style={{width:32}}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {questions.map((q, i) => (
-                  <tr key={i}>
-                    <td>
-                      <input type="text" value={q.label} style={{width:70}}
-                        onChange={e => updateQ(i, {label: e.target.value})} />
-                    </td>
-                    <td>
-                      <select value={q.type} onChange={e => updateQ(i, {type: e.target.value})}>
-                        {Q_TYPES.map(t => <option key={t}>{t}</option>)}
-                      </select>
-                    </td>
-                    <td>
-                      <input type="number" min="0" max="100" value={q.marks} style={{width:64}}
-                        onChange={e => updateQ(i, {marks: parseInt(e.target.value)||0})} />
-                    </td>
-                    <td>
-                      <select value={q.partial} onChange={e => updateQ(i, {partial: e.target.value})}>
-                        <option value="yes">Yes</option>
-                        <option value="no">No</option>
-                        <option value="half">Half only</option>
-                      </select>
-                    </td>
-                    <td>
-                      <button className="ecp-del-btn" onClick={() => removeQuestion(i)}>×</button>
-                    </td>
+          {appMode === "exam" && (
+            <div className="ecp-section">
+              <div className="ecp-section-label">Question-wise marks</div>
+              <table className="ecp-table">
+                <thead>
+                  <tr>
+                    <th style={{width:80}}>Question</th>
+                    <th>Type</th>
+                    <th style={{width:80}}>Marks</th>
+                    <th style={{width:120}}>Partial credit</th>
+                    <th style={{width:32}}></th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-            <button className="ecp-add-btn" onClick={addQuestion}>+ Add question</button>
-            <div className="ecp-marks-summary">
-              <span>Configured: <strong>{qSum}</strong></span>
-              <span style={{color: remaining < 0 ? "var(--danger,#e24b4a)" : remaining === 0 ? "var(--success,#1d9e75)" : "inherit"}}>
-                Remaining: <strong>{remaining}</strong>
-              </span>
+                </thead>
+                <tbody>
+                  {questions.map((q, i) => (
+                    <tr key={i}>
+                      <td>
+                        <input type="text" value={q.label} style={{width:70}}
+                          onChange={e => updateQ(i, {label: e.target.value})} />
+                      </td>
+                      <td>
+                        <select value={q.type} onChange={e => updateQ(i, {type: e.target.value})}>
+                          {Q_TYPES.map(t => <option key={t}>{t}</option>)}
+                        </select>
+                      </td>
+                      <td>
+                        <input type="number" min="0" max="100" value={q.marks} style={{width:64}}
+                          onChange={e => updateQ(i, {marks: parseInt(e.target.value)||0})} />
+                      </td>
+                      <td>
+                        <select value={q.partial} onChange={e => updateQ(i, {partial: e.target.value})}>
+                          <option value="yes">Yes</option>
+                          <option value="no">No</option>
+                          <option value="half">Half only</option>
+                        </select>
+                      </td>
+                      <td>
+                        <button className="ecp-del-btn" onClick={() => removeQuestion(i)}>×</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <button className="ecp-add-btn" onClick={addQuestion}>+ Add question</button>
+              <div className="ecp-marks-summary">
+                <span>Configured: <strong>{qSum}</strong></span>
+                <span style={{color: remaining < 0 ? "var(--danger,#e24b4a)" : remaining === 0 ? "var(--success,#1d9e75)" : "inherit"}}>
+                  Remaining: <strong>{remaining}</strong>
+                </span>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Instructions */}
           <div className="ecp-section">

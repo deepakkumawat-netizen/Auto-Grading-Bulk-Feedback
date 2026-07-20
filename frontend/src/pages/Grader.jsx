@@ -20,6 +20,7 @@ Q3 (5 marks): Expected explanation + example...`
 
 export default function Grader({ onHome }) {
   const { push } = useToast()
+  const [appMode, setAppMode]       = useState('exam') // 'exam' or 'homework'
   const [rubric, setRubric]         = useState('')
   const [files, setFiles]           = useState([])
   const [verify, setVerify]               = useState(false)
@@ -364,6 +365,27 @@ export default function Grader({ onHome }) {
       )}
 
       <main className="page">
+        <div className="rubric-tabs" role="tablist" style={{ marginBottom: '24px' }}>
+          <button role="tab" aria-selected={appMode === 'exam'}
+                  className={`rubric-tab ${appMode === 'exam' ? 'active' : ''}`}
+                  onClick={() => {
+                    setAppMode('exam');
+                    setRubric('');
+                    setHandwritingAudit(false);
+                  }}>
+            📝 Exam Grading Mode
+          </button>
+          <button role="tab" aria-selected={appMode === 'homework'}
+                  className={`rubric-tab ${appMode === 'homework' ? 'active' : ''}`}
+                  onClick={() => {
+                    setAppMode('homework');
+                    setRubric('Homework completion and quality audit. Evaluate spelling, grammar, handwriting quality, and overall effort.');
+                    setHandwritingAudit(true);
+                  }}>
+            ✍️ Homework Checking Mode (Audit Only)
+          </button>
+        </div>
+
         <div className="auto-detect-info">
           <span className="ad-icon">📌</span>
           <div>
@@ -371,132 +393,140 @@ export default function Grader({ onHome }) {
           </div>
         </div>
 
-        <Card>
-          <Card.Header
-            eyebrow="Step 1"
-            title="Rubric"
-            hint={rubricMode === 'manual'
-              ? 'Type the question marking scheme yourself'
-              : 'Upload the question paper — AI reads it and writes the rubric for you'} />
-          <Card.Body>
-            <div className="rubric-tabs" role="tablist">
-              <button role="tab" aria-selected={rubricMode === 'manual'}
-                      className={`rubric-tab ${rubricMode === 'manual' ? 'active' : ''}`}
-                      onClick={() => setRubricMode('manual')}>
-                ✍️ Type manually
-              </button>
-              <button role="tab" aria-selected={rubricMode === 'paper'}
-                      className={`rubric-tab ${rubricMode === 'paper' ? 'active' : ''}`}
-                      onClick={() => setRubricMode('paper')}>
-                📑 Upload question paper
-              </button>
-            </div>
+        {appMode === 'exam' && (
+          <Card>
+            <Card.Header
+              eyebrow="Step 1"
+              title="Rubric"
+              hint={rubricMode === 'manual'
+                ? 'Type the question marking scheme yourself'
+                : 'Upload the question paper — AI reads it and writes the rubric for you'} />
+            <Card.Body>
+              <div className="rubric-tabs" role="tablist">
+                <button role="tab" aria-selected={rubricMode === 'manual'}
+                        className={`rubric-tab ${rubricMode === 'manual' ? 'active' : ''}`}
+                        onClick={() => setRubricMode('manual')}>
+                  ✍️ Type manually
+                </button>
+                <button role="tab" aria-selected={rubricMode === 'paper'}
+                        className={`rubric-tab ${rubricMode === 'paper' ? 'active' : ''}`}
+                        onClick={() => setRubricMode('paper')}>
+                  📑 Upload question paper
+                </button>
+              </div>
 
-            {rubricMode === 'paper' && (
-              <>
-                <div className="fp-grid" style={{ marginBottom: '12px' }}>
-                  <FileDropzone value={paperFiles} onChange={setPaperFiles}
-                                accept=".pdf,.png,.jpg,.jpeg,.webp,.txt"
-                                label="1. Question paper (Required)"
-                                hint="AI will extract each question and detect marks." />
-                  <FileDropzone value={solutionFiles} onChange={setSolutionFiles}
-                                accept=".pdf,.png,.jpg,.jpeg,.webp,.txt"
-                                label="2. Solution Key / Answer Key (Required)"
-                                hint="Provide key to ground correct steps & formulas." />
-                </div>
-                
-                <div style={{ marginBottom: '14px', display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <Button variant="primary" onClick={onGenerateRubric} disabled={paperBusy || !paperFiles.length || !solutionFiles.length} loading={paperBusy}>
-                    ✨ Generate Rubric from Paper & Solution Key
-                  </Button>
-                  {(paperFiles.length > 0 || solutionFiles.length > 0) && (
-                    <Button variant="ghost" onClick={() => { setPaperFiles([]); setSolutionFiles([]); setRubric(''); setPaperMeta(null); }}>
-                      Clear files
+              {rubricMode === 'paper' && (
+                <>
+                  <div className="fp-grid" style={{ marginBottom: '12px' }}>
+                    <FileDropzone value={paperFiles} onChange={setPaperFiles}
+                                  accept=".pdf,.png,.jpg,.jpeg,.webp,.txt"
+                                  label="1. Question paper (Required)"
+                                  hint="AI will extract each question and detect marks." />
+                    <FileDropzone value={solutionFiles} onChange={setSolutionFiles}
+                                  accept=".pdf,.png,.jpg,.jpeg,.webp,.txt"
+                                  label="2. Solution Key / Answer Key (Required)"
+                                  hint="Provide key to ground correct steps & formulas." />
+                  </div>
+                  
+                  <div style={{ marginBottom: '14px', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <Button variant="primary" onClick={onGenerateRubric} disabled={paperBusy || !paperFiles.length || !solutionFiles.length} loading={paperBusy}>
+                      ✨ Generate Rubric from Paper & Solution Key
                     </Button>
+                    {(paperFiles.length > 0 || solutionFiles.length > 0) && (
+                      <Button variant="ghost" onClick={() => { setPaperFiles([]); setSolutionFiles([]); setRubric(''); setPaperMeta(null); }}>
+                        Clear files
+                      </Button>
+                    )}
+                  </div>
+
+                  {paperBusy && (
+                    <div className="paper-meta-pill" style={{background:'#fef9c3',color:'#92400e',borderColor:'#fde68a', marginBottom: '12px'}}>
+                      ⏳ Extracting questions from paper — rubric will appear below…
+                    </div>
                   )}
-                </div>
+                  {paperMeta && rubric.trim() && (
+                    <div className="paper-meta-pill" style={{marginBottom: '12px'}}>
+                      ✅ Rubric locked from question paper — <b>{paperMeta.questions_found} questions</b> ·
+                      total <b>{paperMeta.total_marks} marks</b>
+                      {paperMeta.paper_grade   && <> · <b>Grade {paperMeta.paper_grade}</b></>}
+                      {paperMeta.paper_subject && <> · <b>{paperMeta.paper_subject}</b></>}
+                      {paperMeta.paper_board   && <> · <b>{paperMeta.paper_board}</b></>}
+                      {' '}· auto-filled below ↓
+                    </div>
+                  )}
+                  {!paperBusy && paperFiles.length > 0 && !rubric.trim() && (
+                    <div className="paper-meta-pill" style={{background:'#fee2e2',color:'#991b1b',borderColor:'#fca5a5', marginBottom: '12px'}}>
+                      ⚠️ Rubric not generated yet — click 'Generate Rubric' above.
+                    </div>
+                  )}
+                </>
+              )}
 
-                {paperBusy && (
-                  <div className="paper-meta-pill" style={{background:'#fef9c3',color:'#92400e',borderColor:'#fde68a', marginBottom: '12px'}}>
-                    ⏳ Extracting questions from paper — rubric will appear below…
-                  </div>
-                )}
-                {paperMeta && rubric.trim() && (
-                  <div className="paper-meta-pill" style={{marginBottom: '12px'}}>
-                    ✅ Rubric locked from question paper — <b>{paperMeta.questions_found} questions</b> ·
-                    total <b>{paperMeta.total_marks} marks</b>
-                    {paperMeta.paper_grade   && <> · <b>Grade {paperMeta.paper_grade}</b></>}
-                    {paperMeta.paper_subject && <> · <b>{paperMeta.paper_subject}</b></>}
-                    {paperMeta.paper_board   && <> · <b>{paperMeta.paper_board}</b></>}
-                    {' '}· auto-filled below ↓
-                  </div>
-                )}
-                {!paperBusy && paperFiles.length > 0 && !rubric.trim() && (
-                  <div className="paper-meta-pill" style={{background:'#fee2e2',color:'#991b1b',borderColor:'#fca5a5', marginBottom: '12px'}}>
-                    ⚠️ Rubric not generated yet — click 'Generate Rubric' above.
-                  </div>
-                )}
-              </>
-            )}
-
-            <textarea className="rubric" rows={8} value={rubric}
-                      placeholder={rubricMode === 'paper'
-                        ? 'Generated rubric will appear here. You can edit it freely before grading.'
-                        : RUBRIC_PLACEHOLDER}
-                      onChange={e => setRubric(e.target.value)}
-                      disabled={bulk.loading || paperBusy}/>
-            <RubricLibrary scope={{ grade: 0, subject: '', chapter: '' }} currentRubric={rubric} onLoad={setRubric} />
-          </Card.Body>
-        </Card>
+              <textarea className="rubric" rows={8} value={rubric}
+                        placeholder={rubricMode === 'paper'
+                          ? 'Generated rubric will appear here. You can edit it freely before grading.'
+                          : RUBRIC_PLACEHOLDER}
+                        onChange={e => setRubric(e.target.value)}
+                        disabled={bulk.loading || paperBusy}/>
+              <RubricLibrary scope={{ grade: 0, subject: '', chapter: '' }} currentRubric={rubric} onLoad={setRubric} />
+            </Card.Body>
+          </Card>
+        )}
 
         <Card>
-          <Card.Header eyebrow="Step 2" title="Answer sheets"
-                       hint="Upload photos, scans or PDFs of answer sheets" />
+          <Card.Header eyebrow={appMode === 'exam' ? "Step 2" : "Step 1"} title={appMode === 'exam' ? "Answer sheets" : "Homework sheets"}
+                       hint={appMode === 'exam' ? "Upload photos, scans or PDFs of answer sheets" : "Upload photos, scans or PDFs of homework sheets"} />
           <Card.Body>
             <FileDropzone value={files} onChange={handleFilesChange} multiple
                           accept=".pdf,.png,.jpg,.jpeg,.webp,.txt"
-                          label="Drop answer sheets here (PDF / JPG / PNG / TXT)"
+                          label={appMode === 'exam' ? "Drop answer sheets here (PDF / JPG / PNG / TXT)" : "Drop homework sheets here (PDF / JPG / PNG / TXT)"}
                           hint="Multi-page PDFs are read with pypdf; image scans are OCR'd via Gemini Vision." />
-            <label className="verify-toggle">
-              <input type="checkbox" checked={verify}
-                     onChange={e => setVerify(e.target.checked)} disabled={bulk.loading}/>
-              <div>
-                <div className="vt-title">🔍 Verifier Agent <span className="vt-speed">+3s/sheet</span></div>
-                <div className="vt-sub">A second AI reviews every grade — flags over-generous marks.</div>
-              </div>
-            </label>
+            {appMode === 'exam' && (
+              <label className="verify-toggle">
+                <input type="checkbox" checked={verify}
+                       onChange={e => setVerify(e.target.checked)} disabled={bulk.loading}/>
+                <div>
+                  <div className="vt-title">🔍 Verifier Agent <span className="vt-speed">+3s/sheet</span></div>
+                  <div className="vt-sub">A second AI reviews every grade — flags over-generous marks.</div>
+                </div>
+              </label>
+            )}
             <label className="verify-toggle">
               <input type="checkbox" checked={handwritingAudit}
-                     onChange={e => setHandwritingAudit(e.target.checked)} disabled={bulk.loading}/>
+                     onChange={e => setHandwritingAudit(e.target.checked)} disabled={bulk.loading || appMode === 'homework'}/>
               <div>
                 <div className="vt-title">✍️ Handwriting &amp; Quality Audit <span className="vt-speed">Vision AI</span></div>
                 <div className="vt-sub">Checks handwriting clarity, grammar/spelling errors, effort score, and visual checklist.</div>
               </div>
             </label>
-            <label className="verify-toggle">
-              <input type="checkbox" checked={studyPlan}
-                     onChange={e => setStudyPlan(e.target.checked)} disabled={bulk.loading}/>
-              <div>
-                <div className="vt-title">📖 Study Plan <span className="vt-speed">+3s/sheet</span></div>
-                <div className="vt-sub">Generates a personalised next-steps plan for struggling students.</div>
-              </div>
-            </label>
-            <div className="total-marks-row">
-              <label className="total-marks-label">
-                📋 Total marks of this paper
-                <span className="total-marks-hint">(optional — fixes wrong totals like 81 instead of 80)</span>
+            {appMode === 'exam' && (
+              <label className="verify-toggle">
+                <input type="checkbox" checked={studyPlan}
+                       onChange={e => setStudyPlan(e.target.checked)} disabled={bulk.loading}/>
+                <div>
+                  <div className="vt-title">📖 Study Plan <span className="vt-speed">+3s/sheet</span></div>
+                  <div className="vt-sub">Generates a personalised next-steps plan for struggling students.</div>
+                </div>
               </label>
-              <input
-                type="number"
-                className="total-marks-input"
-                placeholder="e.g. 80"
-                min="1" max="500"
-                value={totalMarks}
-                onChange={e => setTotalMarks(e.target.value)}
-                disabled={bulk.loading}
-              />
-            </div>
-            <ExamConfigPanel value={examConfig} onChange={setExamConfig} />
+            )}
+            {appMode === 'exam' && (
+              <div className="total-marks-row">
+                <label className="total-marks-label">
+                  📋 Total marks of this paper
+                  <span className="total-marks-hint">(optional — fixes wrong totals like 81 instead of 80)</span>
+                </label>
+                <input
+                  type="number"
+                  className="total-marks-input"
+                  placeholder="e.g. 80"
+                  min="1" max="500"
+                  value={totalMarks}
+                  onChange={e => setTotalMarks(e.target.value)}
+                  disabled={bulk.loading}
+                />
+              </div>
+            )}
+            <ExamConfigPanel value={examConfig} onChange={setExamConfig} appMode={appMode} />
             <div className="override-row">
               <div className="override-field">
                 <label className="override-label">
@@ -652,9 +682,19 @@ export default function Grader({ onHome }) {
                 <thead>
                   <tr>
                     <th aria-label="expand" style={{width: 28}}></th>
-                    <th>File</th><th>Student</th><th>Detected</th><th>Marks</th><th>%</th>
+                    <th>File</th><th>Student</th><th>Detected</th>
+                    {appMode === 'exam' ? (
+                      <>
+                        <th>Marks</th><th>%</th>
+                      </>
+                    ) : (
+                      <>
+                        <th>Status</th><th>Effort</th>
+                      </>
+                    )}
                     {handwritingAudit && <th>Clarity</th>}
-                    <th>Verifier</th><th>Top mistake</th><th>PDF</th>
+                    {appMode === 'exam' && <th>Verifier</th>}
+                    <th>Top mistake</th><th>PDF</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -679,11 +719,32 @@ export default function Grader({ onHome }) {
                               </span>
                             ) : ''}
                           </td>
-                          <td>
-                            {r.ok ? `${r.marks_awarded}/${r.marks_total}` : '—'}
-                            {r.grade_tier && <span className="grade-tier-badge" style={{marginLeft:6}}>{r.grade_tier}</span>}
-                          </td>
-                          <td>{r.ok ? `${r.percentage}%` : ''}</td>
+                          {appMode === 'exam' ? (
+                            <>
+                              <td>
+                                {r.ok ? `${r.marks_awarded}/${r.marks_total}` : '—'}
+                                {r.grade_tier && <span className="grade-tier-badge" style={{marginLeft:6}}>{r.grade_tier}</span>}
+                              </td>
+                              <td>{r.ok ? `${r.percentage}%` : ''}</td>
+                            </>
+                          ) : (
+                            <>
+                              <td>
+                                {r.ok ? (
+                                  <span className={`detected-pill`}
+                                        style={{
+                                          background: r.homework_completeness?.status === 'complete' ? 'rgba(29, 158, 117, 0.15)' : r.homework_completeness?.status === 'partial' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(226, 75, 74, 0.15)',
+                                          color: r.homework_completeness?.status === 'complete' ? '#1d9e75' : r.homework_completeness?.status === 'partial' ? '#f59e0b' : '#e24b4a',
+                                          border: '1px solid currentColor',
+                                          textTransform: 'capitalize'
+                                        }}>
+                                    {r.homework_completeness?.status || 'Unknown'}
+                                  </span>
+                                ) : '—'}
+                              </td>
+                              <td>{r.ok ? `${r.effort_score ?? 0}%` : '—'}</td>
+                            </>
+                          )}
 
                           {handwritingAudit && (
                             <td>
@@ -702,9 +763,11 @@ export default function Grader({ onHome }) {
                             </td>
                           )}
 
-                          <td>{r.verifier
-                                ? (r.verifier.agrees ? `✓ ${r.verifier.confidence ?? ''}%` : `⚠ suggests ${r.verifier.suggested_marks}`)
-                                : ''}</td>
+                          {appMode === 'exam' && (
+                            <td>{r.verifier
+                                  ? (r.verifier.agrees ? `✓ ${r.verifier.confidence ?? ''}%` : `⚠ suggests ${r.verifier.suggested_marks}`)
+                                  : ''}</td>
+                          )}
                           <td>
                             {r.ok ? (
                               <>
@@ -724,7 +787,7 @@ export default function Grader({ onHome }) {
                         </tr>
                         {isOpen && r.ok && (
                           <tr className="row-feedback">
-                            <td colSpan={handwritingAudit ? 10 : 9}>
+                            <td colSpan={appMode === 'exam' ? (handwritingAudit ? 10 : 9) : 9}>
                               <FeedbackPanel result={r}
                                              onDownloadTranscript={() => downloadOneTranscript(r)} />
                             </td>
