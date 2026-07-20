@@ -1,7 +1,7 @@
 """AutoGrader LLM router.
 
-- grade_text(...)   → Groq llama for typed/OCR'd answers
-- verify_grade(...) → second Groq call (Verifier Agent)
+- grade_text(...)   → Gemini text grading for typed/OCR'd answers
+- verify_grade(...) → second Gemini call (Verifier Agent)
 - gemini_ocr(...)   → Gemini Flash vision OCR for scanned answer sheets
 """
 from __future__ import annotations
@@ -16,12 +16,8 @@ from typing import Any
 
 import time as _time
 
-from groq import Groq
 from google import genai
 from google.genai import types as gtypes
-
-
-_groq_client: Groq | None = None
 
 # ── Gemini multi-key rotation ────────────────────────────────────────────────
 # Configure GEMINI_API_KEYS as a comma-separated list to spread every Gemini
@@ -112,23 +108,11 @@ def _gemini_text_fallback(messages, *, max_tokens: int, temperature: float = 0.2
 def _groq_chat_with_retry(model: str, messages, *, max_tokens: int,
                            temperature: float = 0.2,
                            response_format=None) -> str:
-    """All text/JSON generation is routed through Gemini (this deployment runs
-    on GEMINI_API_KEY only; Groq text models are not configured). Vision OCR
-    still has a Groq vision fallback — see groq_vision_ocr / _try_groq_chunked."""
+    """All text/JSON generation is routed through Gemini exclusively (Groq is
+    not configured/used in this deployment)."""
     return _gemini_text_fallback(messages, max_tokens=max_tokens,
                                   temperature=temperature,
                                   response_format=response_format)
-
-
-def _groq() -> Groq:
-    global _groq_client
-    from dotenv import load_dotenv
-    load_dotenv(override=True)
-    key = os.getenv("GROQ_API_KEY", "").strip()
-    if not key: raise RuntimeError("GROQ_API_KEY not set")
-    if _groq_client is None or getattr(_groq_client, "api_key", None) != key:
-        _groq_client = Groq(api_key=key)
-    return _groq_client
 
 
 def _gemini() -> genai.Client:
@@ -1416,7 +1400,6 @@ _GEMINI_FALLBACK_CHAIN = [
     "gemini-2.5-flash",
     "gemini-2.0-flash",
     "gemini-flash-latest",
-    "gemini-2.5-pro",
 ]
 
 
@@ -1448,31 +1431,6 @@ def _is_overloaded(msg: str) -> bool:
 def _is_quota(msg: str) -> bool:
     return ("429" in msg or "RESOURCE_EXHAUSTED" in msg
             or "exceeded your current quota" in msg.lower())
-
-
-def groq_vision_ocr(image_bytes_list: list[bytes], prompt: str,
-                    mime: str = "image/png") -> str:
-    """Vision OCR via Groq's Llama 3.2 vision (multimodal). Up to 5 images per call.
-    Used as fallback when Gemini quota is exhausted."""
-    import base64
-
-    model = os.getenv("GROQ_VISION_MODEL", "").strip() or "qwen/qwen3.6-27b"
-    max_imgs = 3 if "qwen" in model.lower() else 5
-    content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
-    for img in image_bytes_list[:max_imgs]:  # Groq vision limits depend on model (Qwen supports up to 3)
-        b64 = base64.b64encode(img).decode("ascii")
-        content.append({
-            "type": "image_url",
-            "image_url": {"url": f"data:{mime};base64,{b64}"},
-        })
-
-    rsp = _groq().chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": content}],
-        temperature=0.2,
-        max_tokens=4000,
-    )
-    return (rsp.choices[0].message.content or "").strip()
 
 
 def gemini_ocr(image_bytes: bytes, mime: str = "image/jpeg",
@@ -1626,35 +1584,6 @@ def _try_gemini_vision_model(model: str, parts, retries: int = 1, base_wait: flo
                 return False, e
             print(f"[gemini-vision {model}] overloaded (attempt {attempt + 1}/{retries + 1}), backing off…")
     return False, last_err
-
-
-def _grade_with_groq_vision_fallback(system_prompt: str,
-                                    images: list[tuple[bytes, str]]) -> dict[str, Any]:
-    """Fallback grading via Groq Llama-4-Scout vision when all Gemini models fail.
-    Up to 5 images per call. Returns the same JSON schema as Gemini path."""
-    import base64
-
-    model = os.getenv("GROQ_VISION_MODEL", "").strip() or "qwen/qwen3.6-27b"
-    max_imgs = 3 if "qwen" in model.lower() else 5
-    content: list[dict[str, Any]] = [{"type": "text", "text": system_prompt}]
-    for img_bytes, mime in images[:max_imgs]:  
-        b64 = base64.b64encode(img_bytes).decode("ascii")
-        content.append({
-            "type": "image_url",
-            "image_url": {"url": f"data:{mime or 'image/png'};base64,{b64}"},
-        })
-
-    # Estimate tokens needed based on question count in prompt (~100 tokens per question)
-    q_count = len(re.findall(r"Q\d+", system_prompt))
-    groq_max_tokens = max(3000, q_count * 100 + 1500)
-    rsp = _groq().chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": content}],
-        temperature=0.2,
-        max_tokens=groq_max_tokens,
-        response_format={"type": "json_object"},
-    )
-    return _extract_json(rsp.choices[0].message.content or "")
 
 
 def grade_handwriting(system_prompt: str,

@@ -38,7 +38,6 @@ import exam_config_store
 import copy_check
 from grading_prompts import build_exam_constraints
 from grade_profiles import get_profile, build_tier_label
-import cbse_kb
 
 
 app = FastAPI(title="AutoGrader — Bulk auto-grading")
@@ -314,9 +313,20 @@ def _try_gemini_unified(image_blobs: list[bytes], prompt: str) -> str:
                 rsp = _gemini().models.generate_content(
                     model=model, contents=parts,
                     config=gtypes.GenerateContentConfig(
-                        thinking_config=gtypes.ThinkingConfig(thinking_budget=0)
+                        thinking_config=gtypes.ThinkingConfig(thinking_budget=0),
+                        # Long answer sheets (15-20+ pages) need a large output budget —
+                        # without this the SDK's default cap truncates the transcript
+                        # mid-paper, silently dropping later questions as "not attempted".
+                        max_output_tokens=65536,
                     ),
                 )
+                try:
+                    finish_reason = rsp.candidates[0].finish_reason
+                    if finish_reason and str(finish_reason).upper().find("MAX_TOKENS") != -1:
+                        print(f"[gemini-unified] WARNING: response hit MAX_TOKENS for {len(image_blobs)} pages — "
+                              "transcript may be truncated. Consider chunking this paper.")
+                except Exception:
+                    pass
                 return (rsp.text or "").strip()
             except Exception as e:
                 msg = str(e); last_err = e
@@ -328,67 +338,6 @@ def _try_gemini_unified(image_blobs: list[bytes], prompt: str) -> str:
                     raise
         print(f"[gemini-unified] {model} overloaded, falling through")
     raise RuntimeError(f"Gemini vision failed: {last_err}")
-
-
-def _try_groq_chunked(image_blobs: list[bytes], prompt: str, chunk_size: int | None = None) -> str:
-    """Multi-chunk Groq vision call.
-    Uses sequential calls with delay to avoid Groq's low RPM/TPM limits on vision models.
-    Supports auto-splitting chunks if they exceed Groq's TPM limits (413 errors).
-    """
-    from llm_router import groq_vision_ocr
-    import time
-    import os
-    
-    if chunk_size is None:
-        model = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
-        chunk_size = 3 if "qwen" in model.lower() else 5
-        
-    chunks = [image_blobs[i:i + chunk_size] for i in range(0, len(image_blobs), chunk_size)]
-    results: dict[int, str] = {}
-    
-    for idx, chunk in enumerate(chunks):
-        chunk_prompt = prompt + f"\n\n(These are pages {idx*chunk_size + 1}–{idx*chunk_size + len(chunk)} of the answer sheet.)"
-        print(f"[groq vision] Processing chunk {idx+1}/{len(chunks)}...")
-        
-        success = False
-        for attempt in range(1, 4):
-            try:
-                text = groq_vision_ocr(chunk, chunk_prompt, mime="image/jpeg")
-                results[idx] = text
-                success = True
-                break
-            except Exception as e:
-                err_msg = str(e)
-                print(f"[groq vision] Chunk {idx+1} attempt {attempt} failed: {e}")
-                if ("413" in err_msg or "request too large" in err_msg.lower() or "please reduce your message size" in err_msg.lower()) and "429" not in err_msg:
-                    print(f"[groq vision] Chunk {idx+1} exceeded TPM size limits. Splitting chunk...")
-                    half = len(chunk) // 2
-                    if half >= 1:
-                        # Process first half
-                        first_text = _try_groq_chunked(chunk[:half], prompt, chunk_size=half)
-                        # Process second half
-                        second_text = _try_groq_chunked(chunk[half:], prompt, chunk_size=len(chunk) - half)
-                        results[idx] = first_text + "\n\n" + second_text
-                        success = True
-                        break
-                    else:
-                        print(f"[groq vision] Critical: Single page is too large for Groq vision!")
-                        break
-                
-                if attempt < 3:
-                    from llm_router import _parse_retry_after
-                    wait = _parse_retry_after(err_msg)
-                    print(f"[groq vision] Waiting {wait:.1f}s before retrying...")
-                    time.sleep(wait)
-                    
-        if not success:
-            results[idx] = f"[groq vision chunk {idx+1} failed]"
-            
-        if idx + 1 < len(chunks):
-            time.sleep(10)
-            
-    ordered = [results[i] for i in sorted(results.keys()) if results[i] and not results[i].startswith("[")]
-    return "\n\n".join(ordered).strip()
 
 
 class QuotaExceeded(Exception):
@@ -911,7 +860,6 @@ async def run_grade_bulk_in_background(
     rubric: str,
     parsed_verify: bool,
     parsed_total_marks: int,
-    parsed_ncert: bool,
     parsed_study_plan: bool,
     eff_grade: int,
     eff_subject: str,
@@ -1052,7 +1000,6 @@ async def grade_bulk(
     rubric:           str  = Form(...),
     verify:           Any  = Form(False),
     total_marks:      Any  = Form(0),
-    ncert_check:      Any  = Form(False),
     study_plan:       Any  = Form(False),
     grade_override:   Any  = Form(None),
     subject_override: str  = Form(""),
@@ -1079,7 +1026,6 @@ async def grade_bulk(
         except Exception: return 0
 
     parsed_verify = _bool(verify)
-    parsed_ncert = _bool(ncert_check)
     parsed_study_plan = _bool(study_plan)
     parsed_handwriting_audit = _bool(handwriting_audit)
     
@@ -1131,7 +1077,6 @@ async def grade_bulk(
         rubric,
         parsed_verify,
         parsed_total_marks,
-        parsed_ncert,
         parsed_study_plan,
         eff_grade,
         eff_subject,
@@ -1653,10 +1598,3 @@ async def agent_class_plan(payload: ClassPlanPayload):
         return plan
     except Exception as e:
         raise HTTPException(500, f"Class plan generation failed: {e}")
-
-
-@app.get("/api/curriculum/{grade}")
-def get_curriculum(grade: int):
-    grade_key = cbse_kb._grade_key(grade)
-    grade_data = cbse_kb.CURRICULUM_KB.get(grade_key, {})
-    return {"subjects": grade_data}

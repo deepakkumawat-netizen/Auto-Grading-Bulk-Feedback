@@ -154,7 +154,6 @@ export default function Grader({ onHome }) {
     const fd = new FormData()
     fd.append('rubric', rubric)
     fd.append('verify', String(verify))
-    fd.append('ncert_check', 'false')
     fd.append('study_plan', String(studyPlan))
     fd.append('total_marks', String(parseInt(totalMarks) || 0))
     fd.append('grade_override', String(examConfig.grade || 0))

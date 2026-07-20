@@ -311,7 +311,13 @@ async def verifier_node(state: GradingState) -> Dict[str, Any]:
         )
         return {"verifier_result": verifier_result}
     except Exception as e:
-        return {"verifier_result": {"agrees": True, "comment": f"Verifier failed: {e}"}}
+        print(f"[verifier] failed for '{state.get('filename')}': {e}")
+        msg = str(e)
+        if "429" in msg or "RESOURCE_EXHAUSTED" in msg or "quota" in msg.lower():
+            comment = "Verifier skipped — Gemini API quota was temporarily exceeded. The original grade stands unreviewed."
+        else:
+            comment = "Verifier could not run due to a temporary error. The original grade stands unreviewed."
+        return {"verifier_result": {"agrees": True, "comment": comment}}
 
 
 async def study_plan_node(state: GradingState) -> Dict[str, Any]:
