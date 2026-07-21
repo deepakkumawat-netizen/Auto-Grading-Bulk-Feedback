@@ -15,7 +15,7 @@ const FEATURES = [
   { icon: '📦', title: 'One-click exports',
     desc: 'CSV of marks + ZIP of personalised PDF feedback for every student.' },
   { icon: '💸', title: 'Free to run',
-    desc: 'Powered by Groq Llama (free). Zero rupees per grading session.' },
+    desc: 'Powered by Gemini (free tier). Zero rupees per grading session.' },
 ]
 
 const STEPS = [

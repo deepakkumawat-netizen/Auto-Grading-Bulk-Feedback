@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import ExamConfigPanel from '../components/ExamConfigPanel.jsx'
 import ClassAnalytics from '../components/ClassAnalytics.jsx'
 import AgentPanel from '../components/AgentPanel.jsx'
@@ -38,6 +38,20 @@ export default function Grader({ onHome }) {
   const [solutionFiles, setSolutionFiles] = useState([])
   const [paperBusy, setPaperBusy]   = useState(false)
   const [paperMeta, setPaperMeta]   = useState(null)   // {questions_found, total_marks, extracted_text}
+  const [paperError, setPaperError] = useState(null)
+
+  // Always-fresh view of the file state, readable from inside the async
+  // onGenerateRubric closure after its awaits resolve (state captured at call
+  // time would otherwise be stale by then).
+  const latestPaperFilesRef = useRef(paperFiles)
+  const latestSolutionFilesRef = useRef(solutionFiles)
+  latestPaperFilesRef.current = paperFiles
+  latestSolutionFilesRef.current = solutionFiles
+  // Identity of the (paper, solution) files the in-flight request was actually submitted with.
+  const inFlightFilesRef = useRef(null)
+  // Set by "Clear files" so a response that lands after the user cleared mid-request
+  // doesn't resurrect a rubric/paperMeta the user just wiped.
+  const cancelRequestRef = useRef(false)
 
   useEffect(() => {
     fetch('/api/health').then(r => r.json()).then(setHealth).catch(() => setHealth({}))
@@ -45,15 +59,22 @@ export default function Grader({ onHome }) {
 
   // Question paper + solution key → AI rubric
   const onGenerateRubric = async () => {
-    const paperFile = paperFiles[0]
-    const solutionFile = solutionFiles[0]
+    // Read from the refs, not the closed-over paperFiles/solutionFiles state — this
+    // function can be re-invoked (from its own finally block) after files changed
+    // mid-request, and must pick up that latest selection, not the one from the
+    // render that originally created this closure.
+    const paperFile = latestPaperFilesRef.current[0]
+    const solutionFile = latestSolutionFilesRef.current[0]
     if (!paperFile) {
       push({ kind: 'error', title: 'Question paper missing', body: 'Please select a question paper.' })
       return
     }
     setPaperBusy(true)
     setPaperMeta(null)
+    setPaperError(null)
     setRubric('')
+    cancelRequestRef.current = false
+    inFlightFilesRef.current = { paper: paperFile, solution: solutionFile }
     try {
       const fd = new FormData()
       fd.append('paper', paperFile, paperFile.name)
@@ -109,6 +130,8 @@ export default function Grader({ onHome }) {
         )
       }
 
+      if (cancelRequestRef.current) return
+
       setRubric(data.rubric)
       setPaperMeta({
         questions_found:        data.questions_found,
@@ -137,13 +160,33 @@ export default function Grader({ onHome }) {
           : `${data.questions_found} question${data.questions_found === 1 ? '' : 's'} found · ${data.total_marks} marks${metaHints ? ` · ${metaHints}` : ''}`,
       })
     } catch (e) {
+      if (cancelRequestRef.current) return
       setRubric('')
       setPaperMeta(null)
+      setPaperError(String(e.message || e))
       push({ kind: 'error', title: 'Rubric generation failed', body: String(e.message || e) })
     } finally {
       setPaperBusy(false)
+      const submitted = inFlightFilesRef.current
+      inFlightFilesRef.current = null
+      const curPaper = latestPaperFilesRef.current
+      const curSolution = latestSolutionFilesRef.current
+      const filesChangedDuringRequest = submitted && curPaper.length > 0 &&
+        (curPaper[0] !== submitted.paper || curSolution[0] !== submitted.solution)
+      if (filesChangedDuringRequest) {
+        onGenerateRubric()
+      }
     }
   }
+
+  // Auto-generate the rubric the moment a question paper (and optionally a solution
+  // key) is uploaded — no manual "Generate" click needed.
+  useEffect(() => {
+    if (rubricMode === 'paper' && paperFiles.length && !paperBusy) {
+      onGenerateRubric()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paperFiles, solutionFiles])
 
   // Accept all supported file types (PDFs, images, txt)
   const handleFilesChange = (incoming) => {
@@ -372,7 +415,6 @@ export default function Grader({ onHome }) {
     push({ kind: 'success', title: 'Loaded from history', body: entry.title })
   }
 
-  const missingGroq = health && !health.groq_configured
   const report = bulk.data
   const canSubmit = !bulk.loading && files.length > 0 && rubric.trim() && examConfig.grade && examConfig.subject
   const flaggedCount = useMemo(
@@ -398,9 +440,6 @@ export default function Grader({ onHome }) {
         </div>
       </header>
 
-      {missingGroq && (
-        <div className="banner">⚠️ GROQ_API_KEY missing — edit backend/.env and restart.</div>
-      )}
 
       <main className="page">
         <div className="rubric-tabs" role="tablist" style={{ marginBottom: '24px' }}>
@@ -459,32 +498,29 @@ export default function Grader({ onHome }) {
                     <FileDropzone value={paperFiles} onChange={setPaperFiles}
                                   accept=".pdf,.png,.jpg,.jpeg,.webp,.txt"
                                   label="1. Question paper (Required)"
-                                  hint="AI will extract each question and detect marks." />
+                                  hint="Rubric generates automatically once this is uploaded." />
                     <FileDropzone value={solutionFiles} onChange={setSolutionFiles}
                                   accept=".pdf,.png,.jpg,.jpeg,.webp,.txt"
                                   label="2. Solution Key / Answer Key (Optional)"
                                   hint="Recommended — grounds correct steps & formulas. If omitted, AI writes the expected answers itself from the question paper." />
                   </div>
-                  
-                  <div style={{ marginBottom: '14px', display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <Button variant="primary" onClick={onGenerateRubric} disabled={paperBusy || !paperFiles.length} loading={paperBusy}>
-                      ✨ Generate Rubric from Paper & Solution Key
-                    </Button>
-                    {(paperFiles.length > 0 || solutionFiles.length > 0) && (
-                      <Button variant="ghost" onClick={() => { setPaperFiles([]); setSolutionFiles([]); setRubric(''); setPaperMeta(null); }}>
+
+                  {(paperFiles.length > 0 || solutionFiles.length > 0) && (
+                    <div style={{ marginBottom: '14px', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <Button variant="ghost" onClick={() => { cancelRequestRef.current = true; setPaperFiles([]); setSolutionFiles([]); setRubric(''); setPaperMeta(null); setPaperError(null) }}>
                         Clear files
                       </Button>
-                    )}
-                  </div>
+                    </div>
+                  )}
 
                   {paperBusy && (
                     <div className="paper-meta-pill" style={{background:'#fef9c3',color:'#92400e',borderColor:'#fde68a', marginBottom: '12px'}}>
-                      ⏳ Extracting questions from paper — rubric will appear below…
+                      ⏳ Reading the paper and writing the rubric automatically — it will appear below…
                     </div>
                   )}
                   {paperMeta && rubric.trim() && (
                     <div className="paper-meta-pill" style={{marginBottom: '12px'}}>
-                      ✅ Rubric locked from question paper — <b>{paperMeta.questions_found} questions</b> ·
+                      ✅ Rubric auto-generated from question paper — <b>{paperMeta.questions_found} questions</b> ·
                       total <b>{paperMeta.total_marks} marks</b>
                       {paperMeta.paper_grade   && <> · <b>Grade {paperMeta.paper_grade}</b></>}
                       {paperMeta.paper_subject && <> · <b>{paperMeta.paper_subject}</b></>}
@@ -498,14 +534,15 @@ export default function Grader({ onHome }) {
                       review the rubric below carefully before grading.
                     </div>
                   )}
-                  {!paperMeta?.auto_generated_answers && paperFiles.length > 0 && !solutionFiles.length && !rubric.trim() && !paperBusy && (
+                  {!paperMeta?.auto_generated_answers && paperFiles.length > 0 && !solutionFiles.length && !rubric.trim() && !paperBusy && !paperError && (
                     <div className="paper-meta-pill" style={{marginBottom: '12px'}}>
-                      ℹ️ No solution key selected — AI will generate the expected answers itself when you click Generate.
+                      ℹ️ No solution key selected yet — AI will generate the expected answers itself.
                     </div>
                   )}
-                  {!paperBusy && paperFiles.length > 0 && !rubric.trim() && (
-                    <div className="paper-meta-pill" style={{background:'#fee2e2',color:'#991b1b',borderColor:'#fca5a5', marginBottom: '12px'}}>
-                      ⚠️ Rubric not generated yet — click 'Generate Rubric' above.
+                  {paperError && !paperBusy && (
+                    <div className="paper-meta-pill" style={{background:'#fee2e2',color:'#991b1b',borderColor:'#fca5a5', marginBottom: '12px', display:'flex', alignItems:'center', gap:'8px', flexWrap:'wrap'}}>
+                      <span>⚠️ {paperError}</span>
+                      <Button size="sm" variant="ghost" onClick={onGenerateRubric}>🔄 Retry</Button>
                     </div>
                   )}
                 </>

@@ -8,7 +8,7 @@ Three agents:
 from __future__ import annotations
 import os
 from typing import Any
-from llm_router import _groq_chat_with_retry, _extract_json
+from llm_router import _gemini_chat_with_retry, _extract_json
 
 
 # ─── shared helpers ───────────────────────────────────────────────────────────
@@ -71,7 +71,6 @@ def insights_chat(
     history: list[dict],
 ) -> str:
     """Answer a teacher's question about the batch grading results."""
-    model   = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
     stats   = _class_stats(results)
     context = _compact_results(results)
 
@@ -102,7 +101,7 @@ If the teacher asks for practice questions, generate them numbered with answer k
     msgs = [{"role": "system", "content": system}]
     msgs.extend(history[-8:])
     msgs.append({"role": "user", "content": message})
-    return _groq_chat_with_retry(model, messages=msgs, temperature=0.35, max_tokens=700)
+    return _gemini_chat_with_retry(messages=msgs, temperature=0.35, max_tokens=700)
 
 
 # ─── Agent 2: practice question generator ────────────────────────────────────
@@ -115,7 +114,6 @@ def generate_practice(
     count: int = 5,
 ) -> list[dict]:
     """Generate targeted practice questions based on one student's mistakes."""
-    model  = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
     pq     = result.get("per_question") or []
     wrong  = [q for q in pq if (q.get("marks_awarded") or 0) < (q.get("marks_total") or 1)]
     mist   = result.get("mistakes") or []
@@ -140,8 +138,7 @@ def generate_practice(
         '{"questions":[{"number":1,"question":"...","marks":1,"difficulty":"easy",'
         '"answer_key":"key points"}]}'
     )
-    raw = _groq_chat_with_retry(
-        model,
+    raw = _gemini_chat_with_retry(
         messages=[
             {"role": "system", "content": "You return only valid JSON."},
             {"role": "user",   "content": prompt},
@@ -156,7 +153,6 @@ def generate_practice(
 
 def generate_class_plan(results: list[dict], rubric: str) -> dict:
     """Generate a focused next-lesson intervention plan from batch results."""
-    model  = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
     stats  = _class_stats(results)
     ctx    = _compact_results(results)
     graded = [r for r in results if r.get("ok")]
@@ -184,8 +180,7 @@ def generate_class_plan(results: list[dict], rubric: str) -> dict:
         '"students_needing_attention":["name1","name2"],'
         '"homework_suggestion":"string"}'
     )
-    raw = _groq_chat_with_retry(
-        model,
+    raw = _gemini_chat_with_retry(
         messages=[
             {"role": "system", "content": "You return only valid JSON."},
             {"role": "user",   "content": prompt},

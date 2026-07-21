@@ -18,7 +18,7 @@ export default function AgentPanel({ results, rubric, classStats }) {
       <div className="ap-header">
         <span className="ap-icon">✦</span>
         <span className="ap-title">AI Teaching Co-pilot</span>
-        <span className="ap-sub">Powered by Groq · acts on these {(results || []).filter(r=>r.ok).length} graded results</span>
+        <span className="ap-sub">Powered by Gemini · acts on these {(results || []).filter(r=>r.ok).length} graded results</span>
       </div>
       <div className="ap-tabs">
         {[['chat','💬 Chat'], ['practice','📝 Practice Qs'], ['plan','🗓 Class Plan']].map(([k,label]) => (

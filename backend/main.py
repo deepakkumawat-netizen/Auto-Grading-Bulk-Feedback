@@ -124,14 +124,12 @@ def health():
     return {
         "ok": True,
         "tool": "AutoGrader",
-        "groq_configured":   bool(os.getenv("GROQ_API_KEY", "").strip()),
         "gemini_configured": bool(os.getenv("GEMINI_API_KEY", "").strip()),
-        "groq_model":   os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
     }
 
 
 
-_MAX_ANSWER_CHARS = 30000  # ~7.5k tokens — fits comfortably in Groq's context
+_MAX_ANSWER_CHARS = 30000  # ~7.5k tokens — fits comfortably in Gemini's context
 
 import re as _re
 import pypdfium2 as _pdfium
@@ -420,8 +418,8 @@ def _extract_question_paper_unified(raw: bytes, max_pages: int = 40, dpi: int = 
 
 
 def _extract_solved_paper_unified(raw: bytes, max_pages: int = 40, dpi: int = 110) -> str:
-    """Multi-image Vision OCR for solved papers. Tries Gemini first; if Gemini's
-    daily quota is exhausted, falls back to Groq Llama 4 Scout (in chunks of 5).
+    """Multi-image Vision OCR for solved papers. Tries Google Cloud Vision first,
+    then Gemini.
     """
     image_blobs = _render_pdf_to_pngs(raw, max_pages=max_pages, dpi=dpi)
     if not image_blobs:
@@ -612,9 +610,9 @@ def _read_sheet_impl(name: str, raw: bytes) -> str:
                             "rescan at higher resolution and try again.")
                 except Exception as e:
                     msg = str(e)
-                    print(f"[_read_sheet] Both Gemini and Groq vision failed for '{name}': {msg}")
+                    print(f"[_read_sheet] Vision OCR failed for '{name}': {msg}")
                     return (f"[vision_failed] Cannot read handwritten answers from this PDF. "
-                            f"Both Gemini and Groq vision OCR failed: {msg[:200]}. Either wait for "
+                            f"Vision OCR failed: {msg[:200]}. Either wait for "
                             "quota to reset, or update API keys in backend/.env")
 
             if len(text) > _MAX_ANSWER_CHARS:
@@ -666,7 +664,7 @@ def _read_sheet(name: str, raw: bytes) -> str:
 
 
 def pre_flight_check(text: str, filename: str, rubric: str) -> dict[str, Any]:
-    """Battery of validators that runs BEFORE Groq is called. Catches the
+    """Battery of validators that runs before the grading call. Catches the
     common 'something's off' cases so we don't burn quota grading garbage.
     Returns { errors[], warnings[], info[] } — each is a list of {code, message}.
     """
@@ -866,10 +864,15 @@ async def run_grade_bulk_in_background(
     resolved_config: dict | None,
     parsed_handwriting_audit: bool,
 ):
-    sem = asyncio.Semaphore(max(1, int(os.getenv("GRADE_CONCURRENCY", "5"))))
+    # Gemini-only: default raised from the Groq-era 5 to 10. Each concurrently-graded
+    # sheet issues a handful of Gemini calls (OCR + 1-3 grading chunks) over its grading
+    # window; concurrency=10 keeps peak in-flight requests with real margin under Gemini's
+    # RPM limits (even conservative Tier-1 estimates), while roughly halving bulk-batch wall time.
+    sem = asyncio.Semaphore(max(1, int(os.getenv("GRADE_CONCURRENCY", "10"))))
     async def bounded(filename: str, raw: bytes):
         if session_id and session_id in GRADING_PROGRESS:
             GRADING_PROGRESS[session_id]["files"][filename] = "grading"
+            GRADING_PROGRESS.move_to_end(session_id)
         async with sem:
             filename_lower = filename.lower()
             import re
@@ -882,6 +885,7 @@ async def run_grade_bulk_in_background(
                 if session_id and session_id in GRADING_PROGRESS:
                     GRADING_PROGRESS[session_id]["files"][filename] = "skipped"
                     GRADING_PROGRESS[session_id]["completed"] += 1
+                    GRADING_PROGRESS.move_to_end(session_id)
                 return {
                     "file": filename,
                     "ok": False,
@@ -910,6 +914,7 @@ async def run_grade_bulk_in_background(
                 if session_id and session_id in GRADING_PROGRESS:
                     GRADING_PROGRESS[session_id]["files"][filename] = "completed"
                     GRADING_PROGRESS[session_id]["completed"] += 1
+                    GRADING_PROGRESS.move_to_end(session_id)
                 return res
             except Exception as e:
                 import traceback
@@ -917,6 +922,7 @@ async def run_grade_bulk_in_background(
                 if session_id and session_id in GRADING_PROGRESS:
                     GRADING_PROGRESS[session_id]["files"][filename] = "failed"
                     GRADING_PROGRESS[session_id]["failed"] += 1
+                    GRADING_PROGRESS.move_to_end(session_id)
                 return {
                     "file": filename,
                     "ok": False,
@@ -1231,9 +1237,10 @@ async def run_generate_rubric_in_background(
     solution_text: str,
 ):
     RUBRIC_PROGRESS[session_id] = {"status": "running", "error": None}
+    RUBRIC_PROGRESS.move_to_end(session_id)
     try:
         result = await asyncio.to_thread(generate_rubric_from_questions, paper_text, solution_text)
-        
+
         # Validate result. If empty rubric, raise error.
         rubric_text = (result.get("rubric") or "").strip()
         if not rubric_text:
@@ -1241,15 +1248,17 @@ async def run_generate_rubric_in_background(
                 "Question paper was read successfully but no questions with marks could be extracted. "
                 "Make sure the file is a question paper with question numbers and mark allocations."
             )
-            
+
         result["extracted_text"] = paper_text[:2000]
         result["solution_text"] = solution_text
         RUBRIC_RESULTS[session_id] = result
         RUBRIC_PROGRESS[session_id] = {"status": "completed", "error": None}
+        RUBRIC_PROGRESS.move_to_end(session_id)
     except Exception as e:
         import traceback
         traceback.print_exc()
         RUBRIC_PROGRESS[session_id] = {"status": "failed", "error": str(e)}
+        RUBRIC_PROGRESS.move_to_end(session_id)
 
 
 def filter_solution_by_set(paper_filename: str, paper_text: str, solution_text: str) -> str:

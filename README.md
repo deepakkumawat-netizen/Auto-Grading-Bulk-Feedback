@@ -55,12 +55,10 @@ start.bat
 
 ### Environment variables (`backend/.env`)
 ```
-GROQ_API_KEY=your_groq_key
 GEMINI_API_KEY=your_gemini_key
 # Optional: comma-separated list of multiple Gemini keys, round-robin rotated
 # on every call. Takes priority over GEMINI_API_KEY when set.
 GEMINI_API_KEYS=key_one,key_two,key_three
-GROQ_MODEL=llama-3.3-70b-versatile
 GEMINI_MODEL=gemini-2.5-flash
 GRADE_CONCURRENCY=5
 ```
