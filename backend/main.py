@@ -1235,15 +1235,51 @@ async def _extract_doc_text(filename: str, raw: bytes) -> str:
     return text
 
 
+def _rubric_cache_path(paper_text: str, solution_text: str) -> str:
+    """Rubric generation is a single LLM call, but re-uploading the exact same
+    question paper + solution key (e.g. regenerating, or a teacher re-testing)
+    used to re-spend that call every time even though the output would be
+    identical. Cache the synthesized rubric by a hash of the two source texts
+    so an exact repeat costs zero LLM calls; any different paper/solution
+    (different subject, different set, even a single edited character) hashes
+    differently and always regenerates fresh."""
+    import hashlib
+    key = hashlib.sha256((paper_text + "\n---\n" + solution_text).encode("utf-8")).hexdigest()
+    cache_dir = os.path.join(os.path.dirname(__file__), "data", "rubric_cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    return os.path.join(cache_dir, f"{key}.json")
+
+
 async def run_generate_rubric_in_background(
     session_id: str,
     paper_text: str,
     solution_text: str,
 ):
+    import json
+
     RUBRIC_PROGRESS[session_id] = {"status": "running", "error": None}
     RUBRIC_PROGRESS.move_to_end(session_id)
     try:
-        result = await asyncio.to_thread(generate_rubric_from_questions, paper_text, solution_text)
+        cache_path = _rubric_cache_path(paper_text, solution_text)
+        result = None
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, "r", encoding="utf-8") as f:
+                    result = json.load(f)
+                print(f"[rubric_cache] Cache HIT for session {session_id} — skipping LLM call")
+            except Exception as e:
+                print(f"[rubric_cache] Failed to read cache: {e}")
+                result = None
+
+        if result is None:
+            result = await asyncio.to_thread(generate_rubric_from_questions, paper_text, solution_text)
+            if (result.get("rubric") or "").strip():
+                try:
+                    with open(cache_path, "w", encoding="utf-8") as f:
+                        json.dump(result, f, ensure_ascii=False)
+                    print(f"[rubric_cache] Cached new rubric for session {session_id}")
+                except Exception as e:
+                    print(f"[rubric_cache] Failed to write cache: {e}")
 
         # Validate result. If empty rubric, raise error.
         rubric_text = (result.get("rubric") or "").strip()
