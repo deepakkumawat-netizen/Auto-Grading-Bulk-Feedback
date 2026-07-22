@@ -282,6 +282,41 @@ def _normalize_vertical_text(text: str) -> str:
     return re.sub(r'\s+', ' ', text)
 
 
+_SUBJECT_KEYWORD_GROUPS = {
+    "science": ["science"],
+    "mathematics": ["mathematics", "maths"],
+    "social science": ["social science", "social studies", "s.st"],
+    "english": ["english"],
+    "hindi": ["hindi", "हिन्दी", "हिंदी"],
+    "physics": ["physics"],
+    "chemistry": ["chemistry"],
+    "biology": ["biology"],
+    "computer science": ["computer science", "computer application", "informatics practices"],
+    "economics": ["economics"],
+    "history": ["history"],
+    "geography": ["geography"],
+    "accountancy": ["accountancy", "accounts"],
+    "business studies": ["business studies"],
+}
+
+
+def detect_subject_keyword(text: str) -> str | None:
+    """Best-effort subject-name detection from a document's header — used only
+    to catch an obvious question-paper / marking-scheme subject mismatch
+    before spending an LLM call on it. NOT used to auto-fill the subject field
+    (that stays intentionally manual, see extract_paper_metadata). Returns
+    None on no recognized keyword, so an unfamiliar header never blocks a
+    legitimate upload — the check this feeds only fires when BOTH sides
+    detect a keyword and they disagree.
+    """
+    header = text[:1500].lower()
+    for canonical, variants in _SUBJECT_KEYWORD_GROUPS.items():
+        for v in variants:
+            if v in header:
+                return canonical
+    return None
+
+
 def extract_paper_metadata(paper_text: str) -> dict[str, Any]:
     """Extract board and total_marks from a question paper header.
     Subject and Grade detection is explicitly disabled and must be selected manually.

@@ -1436,6 +1436,21 @@ async def rubric_from_paper(
                 raise HTTPException(400, f"Could not read solution key: {solution_text or 'no text extracted'}")
             if len(solution_text.strip()) < 30:
                 raise HTTPException(400, "Too little text extracted from solution key — key may be too low resolution.")
+            # Catch an obvious subject mismatch (e.g. Science question paper +
+            # Maths marking scheme) before spending an LLM call merging them
+            # into a nonsensical rubric. Only fires when BOTH sides detect a
+            # subject keyword and they disagree — an unrecognized header on
+            # either side is not treated as a mismatch.
+            from llm_router import detect_subject_keyword
+            paper_subject = detect_subject_keyword(paper_text)
+            solution_subject = detect_subject_keyword(solution_text)
+            if paper_subject and solution_subject and paper_subject != solution_subject:
+                raise HTTPException(
+                    400,
+                    f"Subject mismatch: this question paper looks like {paper_subject.title()}, "
+                    f"but the uploaded marking scheme looks like {solution_subject.title()}. "
+                    "Please upload the marking scheme that matches this question paper."
+                )
             # Slice solution key to match the question paper's set
             solution_text = filter_solution_by_set(paper.filename or "paper", paper_text, solution_text)
             # Strip the generic "General Instructions" preamble (boilerplate evaluator
