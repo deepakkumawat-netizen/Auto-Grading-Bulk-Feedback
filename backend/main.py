@@ -1235,16 +1235,24 @@ async def _extract_doc_text(filename: str, raw: bytes) -> str:
     return text
 
 
+# Bump whenever _RUBRIC_QUALITY_RULES / the rubric-generation prompt changes
+# materially — folded into the cache key so old cached rubrics written under
+# a previous prompt version don't get served stale after a prompt tweak.
+_RUBRIC_PROMPT_VERSION = "2"
+
+
 def _rubric_cache_path(paper_text: str, solution_text: str) -> str:
     """Rubric generation is a single LLM call, but re-uploading the exact same
     question paper + solution key (e.g. regenerating, or a teacher re-testing)
     used to re-spend that call every time even though the output would be
     identical. Cache the synthesized rubric by a hash of the two source texts
-    so an exact repeat costs zero LLM calls; any different paper/solution
-    (different subject, different set, even a single edited character) hashes
-    differently and always regenerates fresh."""
+    (plus the prompt version) so an exact repeat costs zero LLM calls; any
+    different paper/solution (different subject, different set, even a single
+    edited character) hashes differently and always regenerates fresh."""
     import hashlib
-    key = hashlib.sha256((paper_text + "\n---\n" + solution_text).encode("utf-8")).hexdigest()
+    key = hashlib.sha256(
+        (_RUBRIC_PROMPT_VERSION + "\n---\n" + paper_text + "\n---\n" + solution_text).encode("utf-8")
+    ).hexdigest()
     cache_dir = os.path.join(os.path.dirname(__file__), "data", "rubric_cache")
     os.makedirs(cache_dir, exist_ok=True)
     return os.path.join(cache_dir, f"{key}.json")
