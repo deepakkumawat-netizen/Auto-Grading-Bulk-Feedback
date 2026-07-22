@@ -822,7 +822,16 @@ def _filter_student_answer_for_chunk(chunk_q_nums: set[str], student_answer: str
             
     filtered = "\n\n".join(paragraphs)
     if len(filtered) < 200:
-        return student_answer[:8000]
+        # Paragraph-boundary matching failed to isolate this chunk's questions —
+        # common with OCR'd handwriting where blank lines don't line up with
+        # question breaks. Falling back to a head-slice of the answer sheet is
+        # wrong for any chunk past the first: it silently starves later chunks
+        # (e.g. Q34-39) of their actual answers, so the grader reports them as
+        # "not attempted" even though the student answered them further down the
+        # sheet. Fall back to the full text instead — the "CRITICAL CHUNKING
+        # RULE" in the prompt already tells the model to only grade this chunk's
+        # questions, so seeing the rest of the sheet is harmless.
+        return student_answer[:30000]
     return filtered[:12000]
 
 
@@ -1340,10 +1349,24 @@ async def transcribe_chunk_async(images_chunk: list[tuple[bytes, str]], start_pa
             config=gtypes.GenerateContentConfig(
                 response_mime_type="application/json",
                 temperature=0.1,
-                max_output_tokens=4000,
+                # 4000 was too small for dense handwritten pages (long-form essay
+                # answers, diagrams) — the JSON response got cut off mid-string,
+                # so later pages in a chunk silently lost their transcript and
+                # the corresponding questions graded as "not attempted" even
+                # though the student answered them. 8192 is gemini-2.0-flash's
+                # actual output ceiling (see _try_gemini_unified for the same
+                # class of fix on the other OCR path).
+                max_output_tokens=8192,
                 thinking_config=gtypes.ThinkingConfig(thinking_budget=0),
             ),
         )
+        try:
+            finish_reason = rsp.candidates[0].finish_reason
+            if finish_reason and str(finish_reason).upper().find("MAX_TOKENS") != -1:
+                print(f"[transcribe_chunk] WARNING: response hit MAX_TOKENS for pages "
+                      f"starting at {start_page} — transcript may be truncated.")
+        except Exception:
+            pass
         return _extract_json(rsp.text or "")
 
     try:
@@ -1354,8 +1377,14 @@ async def transcribe_chunk_async(images_chunk: list[tuple[bytes, str]], start_pa
         return f"\n--- PAGE {start_page} (Transcription Error) ---\n"
 
 
-async def transcribe_all_pages_concurrently(images: list[tuple[bytes, str]], chunk_size: int = 4) -> str:
-    """Run concurrent transcription for all pages in small chunks."""
+async def transcribe_all_pages_concurrently(images: list[tuple[bytes, str]], chunk_size: int = 2) -> str:
+    """Run concurrent transcription for all pages in small chunks.
+
+    chunk_size=2 (not 4): verbatim transcription of dense handwritten pages
+    (long-form answers, diagrams) can still approach gemini-2.0-flash's 8192
+    output-token ceiling at 4 pages/call, silently dropping the tail of the
+    chunk. 2 pages/call leaves headroom at the cost of ~2x the OCR calls.
+    """
     tasks = []
     for i in range(0, len(images), chunk_size):
         chunk = images[i:i+chunk_size]
@@ -1381,10 +1410,24 @@ def _try_gemini_vision_model(model: str, parts, retries: int = 1, base_wait: flo
                 config=gtypes.GenerateContentConfig(
                     response_mime_type="application/json",
                     temperature=0.2,
-                    max_output_tokens=8192,
+                    # This is the single vision-grading call for the WHOLE paper —
+                    # detailed per-question feedback + student_answer quotes across
+                    # 30-40+ questions can exceed 8192 tokens and get cut off
+                    # mid-JSON, silently dropping the tail questions (confirmed:
+                    # a 39-question paper truncated after Q37, losing Q37(b)
+                    # onward entirely). Match the budget used for other
+                    # long-document Gemini calls in this codebase.
+                    max_output_tokens=65536,
                     thinking_config=gtypes.ThinkingConfig(thinking_budget=0),
                 ),
             )
+            try:
+                finish_reason = rsp.candidates[0].finish_reason
+                if finish_reason and str(finish_reason).upper().find("MAX_TOKENS") != -1:
+                    print(f"[gemini-vision {model}] WARNING: grading response hit MAX_TOKENS — "
+                          "per-question results were likely truncated.")
+            except Exception:
+                pass
             return True, _extract_json(rsp.text or "")
         except Exception as e:
             msg = str(e)

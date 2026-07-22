@@ -29,6 +29,7 @@ class GradingState(TypedDict):
     subject: str
     chapter: str
     answer_text: str
+    full_answer_text: str
     extraction_hint: str
     pre_flight_checks: Dict[str, Any]
     system_prompt: str
@@ -44,7 +45,7 @@ class GradingState(TypedDict):
 
 
 async def ocr_and_preflight_node(state: GradingState) -> Dict[str, Any]:
-    from main import _read_sheet, _fast_scope, pre_flight_check, _render_pdf_to_pngs
+    from main import _read_sheet, _fast_scope, pre_flight_check, _render_pdf_to_pngs, _MAX_ANSWER_CHARS
     
     filename = state["filename"]
     raw = state["raw_bytes"]
@@ -59,7 +60,12 @@ async def ocr_and_preflight_node(state: GradingState) -> Dict[str, Any]:
     filename_lower = filename.lower()
     if filename_lower.endswith(".pdf"):
         try:
-            page_blobs = _render_pdf_to_pngs(raw, max_pages=15, dpi=110)
+            # max_pages=15 previously silently dropped every page past 15 from
+            # a scanned answer sheet — long board-exam papers (20-30+ pages)
+            # lost their later questions entirely before OCR ever saw them,
+            # grading them as "not attempted". 40 matches the other OCR paths
+            # (_extract_question_paper_unified / _extract_solved_paper_unified).
+            page_blobs = _render_pdf_to_pngs(raw, max_pages=40, dpi=110)
             images = [(b, "image/jpeg") for b in page_blobs]
         except Exception as e:
             print(f"[grading_graph] Failed to render PDF to images: {e}")
@@ -69,22 +75,38 @@ async def ocr_and_preflight_node(state: GradingState) -> Dict[str, Any]:
 
     # ── OCR / Concurrent Transcription ──────────────────────────────────────
     answer_text = ""
+    full_answer_text = ""
     if handwriting_audit and images:
         from llm_router import transcribe_all_pages_concurrently
         answer_text = await transcribe_all_pages_concurrently(images)
-    
+        full_answer_text = answer_text
+
     is_corrupted_transcription = (
-        not answer_text or 
-        "Transcription Error" in answer_text or 
+        not answer_text or
+        "Transcription Error" in answer_text or
         len(answer_text.strip()) < 50
     )
     if not handwriting_audit or not images or is_corrupted_transcription:
         native_text = await asyncio.to_thread(_read_sheet, filename, raw)
         if native_text and not native_text.startswith("["):
-            answer_text = native_text
+            # Keep the FULL extracted text (before any length cap) for consumers
+            # that filter/slice it by a downstream criterion — e.g. copy_check
+            # splits answer text by question number. Capping before that split
+            # would silently drop content past the cutoff on just one side of a
+            # comparison. The grading LLM calls below use a capped copy instead,
+            # since Gemini needs a bounded context regardless of question
+            # boundaries — this mirrors the cap _read_sheet used to apply
+            # internally, just moved to after the full text is captured.
+            full_answer_text = native_text
+            if len(native_text) > _MAX_ANSWER_CHARS:
+                answer_text = (native_text[:_MAX_ANSWER_CHARS] +
+                                f"\n\n[note: truncated for grading — original answer was {len(native_text)} chars]")
+            else:
+                answer_text = native_text
         elif not answer_text:
             answer_text = native_text or "[ocr failed]"
-    
+            full_answer_text = answer_text
+
     extraction_hint = ""
     error = None
     
@@ -113,6 +135,7 @@ async def ocr_and_preflight_node(state: GradingState) -> Dict[str, Any]:
     if error:
         return {
             "answer_text": answer_text,
+            "full_answer_text": full_answer_text,
             "error": error,
             "grade_level": grade_level,
             "subject": subject,
@@ -132,6 +155,7 @@ async def ocr_and_preflight_node(state: GradingState) -> Dict[str, Any]:
     
     return {
         "answer_text": answer_text,
+        "full_answer_text": full_answer_text,
         "grade_level": grade_level,
         "subject": subject,
         "chapter": chapter,
@@ -351,7 +375,7 @@ def polish_node(state: GradingState) -> Dict[str, Any]:
         fallback = _make_fallback_result(
             state["filename"],
             state["error"],
-            state.get("answer_text", ""),
+            state.get("full_answer_text") or state.get("answer_text", ""),
             state.get("grade_level", 10),
             state.get("subject", "General"),
             state.get("chapter", ""),
@@ -382,7 +406,7 @@ def polish_node(state: GradingState) -> Dict[str, Any]:
     out = {
         "file": state["filename"],
         "ok": True,
-        "extracted_text": state["answer_text"],
+        "extracted_text": state.get("full_answer_text") or state["answer_text"],
         "grade_used": grade_level,
         "subject_used": state["subject"],
         "chapter_used": state["chapter"],

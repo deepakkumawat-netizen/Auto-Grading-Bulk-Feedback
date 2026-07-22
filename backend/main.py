@@ -536,7 +536,10 @@ def looks_like_question_paper(text: str) -> tuple[bool, str]:
 def _read_pdf_text_fast(raw: bytes) -> str:
     """Pypdf-only PDF text extraction — fast, no Vision fallback.
     Converts PDF into a Markdown format by dividing pages with headers.
-    Used by /api/rubric/from-paper where we KNOW the input is a question paper."""
+    Used by /api/rubric/from-paper where we KNOW the input is a question paper.
+    Returns the FULL extracted text, untruncated — callers that need a length
+    cap (e.g. after set-filtering a multi-set solution key) must truncate
+    themselves, since truncating here would cut content before it's filtered."""
     try:
         reader = PdfReader(io.BytesIO(raw))
         pages = []
@@ -550,8 +553,6 @@ def _read_pdf_text_fast(raw: bytes) -> str:
         markdown_pages = [f"## Page {i + 1}\n\n{text.strip()}" for i, text in enumerate(pages) if text.strip()]
         text = "\n\n".join(markdown_pages).strip()
         text = _de_space_text(text)
-        if len(text) > _MAX_ANSWER_CHARS:
-            text = text[:_MAX_ANSWER_CHARS] + f"\n\n[truncated]"
         return text
     except Exception as e:
         return f"[pdf extract failed: {e}]"
@@ -596,8 +597,10 @@ def _read_sheet_impl(name: str, raw: bytes) -> str:
                             r"Answer\s*:\s*(?!\s*\[BLANK\])[^\n]+", vision_text, _re.IGNORECASE))
                     print(f"[_read_sheet] '{name}': Vision extracted {non_blank} non-blank answers")
                     if non_blank >= 1 or (vision_text and len(vision_text.strip()) > 100):
-                        if len(vision_text) > _MAX_ANSWER_CHARS:
-                            vision_text = vision_text[:_MAX_ANSWER_CHARS] + "\n\n[truncated]"
+                        # Return FULL text, untruncated — grading_graph applies the length
+                        # cap only to the copy it sends to the grading LLM. Truncating here
+                        # would cut content before copy_check's per-question split ever sees
+                        # it, silently dropping late questions from plagiarism comparison.
                         return vision_text
                     # Vision ran but found NO handwritten answers → this is a pure
                     # question paper, not a solved sheet. Surface a clear rejection.
@@ -615,8 +618,9 @@ def _read_sheet_impl(name: str, raw: bytes) -> str:
                             f"Vision OCR failed: {msg[:200]}. Either wait for "
                             "quota to reset, or update API keys in backend/.env")
 
-            if len(text) > _MAX_ANSWER_CHARS:
-                text = text[:_MAX_ANSWER_CHARS] + f"\n\n[note: truncated — original answer was {len(text)} chars across {len(pages)} pages]"
+            # Return FULL text, untruncated — see comment above. grading_graph
+            # caps the LLM-facing copy after this; extracted_text (used by
+            # copy_check's per-question split) stays untruncated.
             return text
         except Exception as e:
             return f"[pdf extract failed: {e}]"
@@ -1384,6 +1388,8 @@ async def rubric_from_paper(
         raise HTTPException(400, f"Could not read question paper: {paper_text or 'no text extracted'}")
     if len(paper_text.strip()) < 30:
         raise HTTPException(400, "Too little text extracted from question paper — paper may be too low resolution.")
+    if len(paper_text) > _MAX_ANSWER_CHARS:
+        paper_text = paper_text[:_MAX_ANSWER_CHARS] + "\n\n[truncated]"
 
     solution_text = ""
     if solution is not None:
@@ -1396,6 +1402,20 @@ async def rubric_from_paper(
                 raise HTTPException(400, "Too little text extracted from solution key — key may be too low resolution.")
             # Slice solution key to match the question paper's set
             solution_text = filter_solution_by_set(paper.filename or "paper", paper_text, solution_text)
+            # Strip the generic "General Instructions" preamble (boilerplate evaluator
+            # instructions, identical across every CBSE marking scheme) before truncating —
+            # it has zero rubric-relevant content but can eat ~7-8k chars of the char budget
+            # before the real "MARKING SCHEME" / question content ever appears.
+            marker_idx = solution_text.find("MARKING SCHEME")
+            if marker_idx == -1:
+                marker_idx = solution_text.lower().find("marking scheme")
+            if marker_idx > 0:
+                solution_text = solution_text[marker_idx:]
+            # Truncate AFTER set-filtering so the cap applies to the relevant
+            # set only, not to the full multi-set PDF (which could cut off
+            # this set's later questions before filtering ever sees them).
+            if len(solution_text) > _MAX_ANSWER_CHARS:
+                solution_text = solution_text[:_MAX_ANSWER_CHARS] + "\n\n[truncated]"
 
     if not session_id:
         import uuid
